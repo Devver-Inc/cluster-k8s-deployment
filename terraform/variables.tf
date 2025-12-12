@@ -1,33 +1,44 @@
-#############################################
-# Variables globales
-#############################################
 
-#variable "proxmox_api_url" {"https://192.168.5.3:8006/api2/json"}
-
-variable "proxmox_api_url" {
-  default = "https://192.168.5.3:8006/api2/json"
+variable "gateway" {
+  description = "Gateway of the cluster"
+  default     = "192.168.45.1"
 }
 
-variable "proxmox_api_token_id" {
-  default = "root@pam"
+variable "master_count" {
+  description = "Number of master nodes"
+  default     = 3
 }
 
-variable "proxmox_api_token_secret" {
-  default = ""
+variable "worker_count" {
+  description = "Number of worker nodes"
+  default     = 3
 }
 
-
-# Proxmox node
-variable "target_node" {
-  default = "PROXMOX-PVE1"
+variable "masters_range_start" {
+  default = "192.168.45.100"
+}
+variable "masters_range_end" {
+  default = "192.168.45.125"
 }
 
-# Liste des IP MASTER (chargées via masters_list.tfvars)
-variable "master_ips" {
-  type = list(string)
+variable "workers_range_start" {
+  default = "192.168.45.126"
+}
+variable "workers_range_end" {
+  default = "192.168.45.250"
 }
 
-# Liste des IP WORKER (chargées via workers_list.tfvars)
-variable "worker_ips" {
-  type = list(string)
+variable "vm_template" {
+  description = "Proxmox template name"
+  default     = "ubuntu-cloud-template"
+}
+
+variable "node" {
+  description = "Proxmox node name"
+  default     = "pve"
+}
+
+variable "ssh_username" {
+  description = "Username created on the VM"
+  default     = "admin"
 }
