@@ -17,7 +17,6 @@ def ip_range(start, end):
     return ips
 
 def used_ips_from_file(path):
-def used_ips_from_allocated_json(path):
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -27,6 +26,9 @@ def used_ips_from_allocated_json(path):
         return used
     except Exception:
         return []
+
+def used_ips_from_allocated_json(path):
+    return used_ips_from_file(path)
 
 def pick_available(range_list, used, count):
     avail = [ip for ip in range_list if ip not in used]
@@ -42,9 +44,9 @@ def main():
     w_end = payload.get("worker_range_end")
     m_count = int(payload.get("master_count", 0))
     w_count = int(payload.get("worker_count", 0))
-        allocated_path = payload.get("allocated_ips_path", "./allocated_ips.json")
+    allocated_path = payload.get("allocated_ips_path", "./allocated_ips.json")
 
-        used = used_ips_from_allocated_json(allocated_path)
+    used = used_ips_from_allocated_json(allocated_path)
 
     masters = pick_available(ip_range(m_start, m_end), used, m_count) if m_count>0 else []
     used = used + masters
