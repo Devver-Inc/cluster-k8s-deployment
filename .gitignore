@@ -1,1 +1,3 @@
-/terraform/variables.tf
+# Ignore Terraform variable files
+terraform/variables.tf
+
