@@ -1,59 +1,37 @@
-#############################################
-# Déploiement des MASTER NODES
-#############################################
-
 resource "proxmox_vm_qemu" "masters" {
-  for_each = toset(var.master_ips)
+  count = length(local.master_ips)
 
-  # VMID => concat 3e + 4e octet de l'IP
-  vmid = tonumber("${split(".", each.value)[2]}${split(".", each.value)[3]}")
-
-  # Nom => DEVVER-KUB-MASTER-1 / MASTER-2 / MASTER-3 …
-  name = "DEVVER-KUB-MASTER-${local.master_map[each.value] + 1}"
-
+  vmid = tonumber("${split(".", local.master_ips[count.index])[2]}${split(".", local.master_ips[count.index])[3]}")
+  name = "DEVVER-KUB-MASTER-${count.index + 1}"
   target_node = var.target_node
   agent       = 1
 
-  # CONFIGURATION SPÉCIFIQUE MASTER
   cpu {
-  cores = 4
-  sockets = 1
-}
+    cores   = 4
+    sockets = 1
+  }
   memory      = 4096
-  clone       = "debian13-cloudinit"
+  clone       = var.vm_template
   scsihw      = "virtio-scsi-single"
   vm_state    = "running"
   automatic_reboot = true
 
-  # IP cloud-init
-  cicustom   = "vendor=local:snippets/qemu-guest-agent.yml" # /var/lib/vz/snippets/qemu-guest-agent.yml
+  cicustom   = "vendor=local:snippets/qemu-guest-agent.yml"
   ciupgrade  = true
   skip_ipv6  = true
-  ciuser     = "user"
-  cipassword = "user"
-  nameserver = "1.1.1.1 8.8.8.8"
-  ipconfig0 = "ip=${each.value}/24,gw=192.168.45.200"
-  sshkeys = local.public_key
+  ciuser     = "devver"
+  nameserver = var.nameserver
+  ipconfig0  = "ip=${local.master_ips[count.index]}/24,gw=192.168.45.200"
+  sshkeys    = file(var.public_key_path)
 
   serial { id = 0 }
 
   disks {
     scsi {
-      scsi0 {
-        disk {
-          storage = "SSD-PVE-DATA"
-          size    = "40G"
-        }
-      }
+      scsi0 { disk { storage = "SSD-PVE-DATA" size = "40G" } }
     }
-
     ide {
-      # Some images require a cloud-init disk on the IDE controller, others on the SCSI or SATA controller
-      ide1 {
-        cloudinit {
-          storage = "SSD-PVE-DATA"
-        }
-      }
+      ide1 { cloudinit { storage = "SSD-PVE-DATA" } }
     }
   }
 
