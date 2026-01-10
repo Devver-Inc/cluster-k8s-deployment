@@ -52,7 +52,7 @@ def main():
     used = used + masters
     workers = pick_available(ip_range(w_start, w_end), used, w_count) if w_count>0 else []
 
-    out = {"master_ips": masters, "worker_ips": workers}
+    out = {"master_ips": json.dumps(masters), "worker_ips": json.dumps(workers)}
     print(json.dumps(out))
 
 if __name__ == '__main__':

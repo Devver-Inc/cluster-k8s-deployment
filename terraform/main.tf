@@ -12,8 +12,8 @@ data "external" "ip_allocator" {
 }
 
 locals {
-  master_ips = data.external.ip_allocator.result.master_ips
-  worker_ips = data.external.ip_allocator.result.worker_ips
+  master_ips = jsondecode(data.external.ip_allocator.result.master_ips)
+  worker_ips = jsondecode(data.external.ip_allocator.result.worker_ips)
 }
 
 resource "local_file" "kubespray_inventory" {
