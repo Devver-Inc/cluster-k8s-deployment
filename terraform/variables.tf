@@ -38,7 +38,7 @@ variable "master_count" {
 variable "worker_count" {
   description = "Nombre de workers à provisionner"
   type        = number
-  default     = 3
+  default     = 4
 }
 
 variable "master_range_start" {
