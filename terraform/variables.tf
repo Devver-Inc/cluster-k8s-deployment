@@ -84,7 +84,7 @@ variable "worker_ips" {
 variable "public_key_path" {
   description = "Chemin vers la clé publique SSH à injecter dans les VM"
   type        = string
-  default     = "~/.ssh/id_rsa.pub"
+  default     = "~/.ssh/yes.pub"
 }
 
 variable "vm_template" {
