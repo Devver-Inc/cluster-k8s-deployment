@@ -84,4 +84,3 @@ variable "nameserver" {
   type        = string
   default     = "1.1.1.1 8.8.8.8"
 }
-#
