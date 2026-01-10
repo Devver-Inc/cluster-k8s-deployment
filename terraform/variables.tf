@@ -71,6 +71,16 @@ variable "allocated_ips_path" {
   default     = "allocated_ips.json"
 }
 
+variable "master_ips" {
+  description = "Liste d'adresses IP pour les masters"
+  type        = list(string)
+}
+
+variable "worker_ips" {
+  description = "Liste d'adresses IP pour les workers"
+  type        = list(string)
+}
+
 variable "public_key_path" {
   description = "Chemin vers la clé publique SSH à injecter dans les VM"
   type        = string
