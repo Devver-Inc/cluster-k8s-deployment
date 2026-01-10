@@ -51,46 +51,42 @@ def main():
     try:
         with open(allocated_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-            prev_masters = data.get("master_ips", [])
-            prev_workers = data.get("worker_ips", [])
+            prev_masters = list(dict.fromkeys(data.get("master_ips", [])))
+            prev_workers = list(dict.fromkeys(data.get("worker_ips", [])))
     except Exception:
         pass
 
-    # Build full used set from previous allocations so we don't reuse them
-    used = []
-    used += prev_masters
-    used += prev_workers
+    # Start used set from previous allocations (de-duped)
+    used = set(prev_masters + prev_workers)
 
-    # Compute masters: keep existing allocations that are still in range, then add new ones
+    # Compute masters: keep previous allocations that are still in range, then add new ones
     masters = []
     if m_count > 0:
         full_range_m = ip_range(m_start, m_end)
-        # keep previous masters that are still within range and unique
+        # keep previous masters that are still within range (preserve order)
         for ip in prev_masters:
             if ip in full_range_m and len(masters) < m_count:
                 masters.append(ip)
+        # mark kept masters as used
+        used.update(masters)
         # add newly available IPs if needed
         if len(masters) < m_count:
-            # recompute used to include kept masters
-            used = list(set(used))
-            used = [u for u in used if u not in masters]
             extra = pick_available(full_range_m, used, m_count - len(masters))
             masters += extra
-            used += extra
+            used.update(extra)
 
-    # Compute workers similarly
+    # Compute workers similarly, ensuring no overlap with masters
     workers = []
     if w_count > 0:
         full_range_w = ip_range(w_start, w_end)
         for ip in prev_workers:
-            if ip in full_range_w and len(workers) < w_count:
+            if ip in full_range_w and ip not in masters and len(workers) < w_count:
                 workers.append(ip)
+        used.update(workers)
         if len(workers) < w_count:
-            used = list(set(used))
-            used = [u for u in used if u not in workers]
             extra = pick_available(full_range_w, used, w_count - len(workers))
             workers += extra
-            used += extra
+            used.update(extra)
 
     out = {"master_ips": json.dumps(masters), "worker_ips": json.dumps(workers)}
     print(json.dumps(out))
