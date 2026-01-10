@@ -19,11 +19,11 @@ locals {
 resource "local_file" "kubespray_inventory" {
   content = join("\n", concat(
     ["[kube_control_plane]"],
-    [for ip in local.master_ips : "master-${replace(ip, \".\", \"-\")} ansible_host=${ip} ansible_user=user ansible_become=True"],
+    [for ip in local.master_ips : "master-${replace(ip, ".", "-")} ansible_host=${ip} ansible_user=user ansible_become=True"],
     ["", "[etcd]"],
-    [for ip in local.master_ips : "master-${replace(ip, \".\", \"-\")} ansible_host=${ip} ansible_user=user ansible_become=True"],
+    [for ip in local.master_ips : "master-${replace(ip, ".", "-")} ansible_host=${ip} ansible_user=user ansible_become=True"],
     ["", "[kube_node]"],
-    [for ip in concat(local.master_ips, local.worker_ips) : "node-${replace(ip, \".\", \"-\")} ansible_host=${ip} ansible_user=user ansible_become=True"],
+    [for ip in concat(local.master_ips, local.worker_ips) : "node-${replace(ip, ".", "-")} ansible_host=${ip} ansible_user=user ansible_become=True"],
     ["", "[k8s_cluster:children]", "kube_control_plane", "kube_node"]
   ))
   filename = "${path.module}/generated_hosts.ini"
