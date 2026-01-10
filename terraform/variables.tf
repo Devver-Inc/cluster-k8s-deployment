@@ -1,17 +1,20 @@
 variable "proxmox_url" {
   description = "Proxmox API URL (https://proxmox.example:8006)"
   type        = string
+  default     = "https://192.168.5.3:8006/api2/json"
 }
 
-variable "proxmox_user" {
+variable "proxmox_token_id" {
   description = "Proxmox API user (e.g. root@pam)"
   type        = string
+  default     = "root@pam!devver"
 }
 
 variable "proxmox_password" {
   description = "Proxmox API password"
   type        = string
   sensitive   = true
+  default     = ""
 }
 
 variable "proxmox_tls_insecure" {
@@ -23,6 +26,7 @@ variable "proxmox_tls_insecure" {
 variable "target_node" {
   description = "Proxmox target node where VMs are created"
   type        = string
+  default     = "PROXMOX-PVE1"
 }
 
 variable "master_count" {
