@@ -28,10 +28,19 @@ resource "proxmox_vm_qemu" "masters" {
 
   disks {
     scsi {
-      scsi0 { disk { storage = "SSD-PVE-DATA" size = "40G" } }
+      scsi0 {
+        disk {
+          storage = "SSD-PVE-DATA"
+          size    = "40G"
+        }
+      }
     }
     ide {
-      ide1 { cloudinit { storage = "SSD-PVE-DATA" } }
+      ide1 {
+        cloudinit {
+          storage = "SSD-PVE-DATA"
+        }
+      }
     }
   }
 

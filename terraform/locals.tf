@@ -17,5 +17,7 @@ locals {
 
   public_key = file("~/.ssh/yes.pub")
 
+  allocated_ips_path = "${path.module}/allocated_ips.json"
+
 
 }

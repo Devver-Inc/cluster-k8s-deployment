@@ -64,7 +64,7 @@ variable "worker_range_end" {
 variable "allocated_ips_path" {
   description = "Chemin vers le fichier JSON conservant les IPs allouées par Terraform"
   type        = string
-  default     = "${path.module}/allocated_ips.json"
+  default     = "allocated_ips.json"
 }
 
 variable "public_key_path" {
