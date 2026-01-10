@@ -1,8 +1,8 @@
 resource "proxmox_vm_qemu" "masters" {
-  count = length(local.master_ips)
+  for_each = { for ip in local.master_ips : ip => ip }
 
-  vmid = tonumber("${split(".", local.master_ips[count.index])[2]}${split(".", local.master_ips[count.index])[3]}")
-  name = "DEVVER-KUB-MASTER-${count.index + 1}"
+  vmid = tonumber(join("", [split(".", each.key)[2], split(".", each.key)[3]]))
+  name = "DEVVER-KUB-MASTER-${replace(each.key, ".", "-")}"
   target_node = var.target_node
   agent       = 1
 
@@ -21,7 +21,7 @@ resource "proxmox_vm_qemu" "masters" {
   skip_ipv6  = true
   ciuser     = "devver"
   nameserver = var.nameserver
-  ipconfig0  = "ip=${local.master_ips[count.index]}/24,gw=192.168.45.200"
+  ipconfig0  = "ip=${each.key}/24,gw=192.168.45.200"
   sshkeys    = file(var.public_key_path)
 
   serial { id = 0 }
