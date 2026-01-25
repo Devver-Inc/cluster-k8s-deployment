@@ -29,8 +29,8 @@ resource "proxmox_vm_qemu" "masters" {
   cicustom   = "vendor=local:snippets/qemu-guest-agent.yml" # /var/lib/vz/snippets/qemu-guest-agent.yml
   ciupgrade  = true
   skip_ipv6  = true
-  ciuser     = "user"
-  cipassword = "user"
+  ciuser     = "devver"
+  cipassword = "devver"
   nameserver = "1.1.1.1 8.8.8.8"
   ipconfig0 = "ip=${each.value}/24,gw=192.168.45.200"
   sshkeys = local.public_key
