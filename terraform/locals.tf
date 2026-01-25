@@ -15,7 +15,7 @@ locals {
     ip => idx
   }
 
-  public_key = file("~/.ssh/yes.pub")
+  public_key = file("~/.ssh/devver-infra.pub")
 
 
 }
