@@ -64,5 +64,5 @@ resource "proxmox_vm_qemu" "masters" {
     tag    = 45
   }
 
-  tags = "devver;K8s;worker"
+  tags = "devver;K8s;master"
 }
