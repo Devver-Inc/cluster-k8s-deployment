@@ -37,4 +37,4 @@
       command: kubectl label node worker3 node-role.kubernetes.io/worker= --overwrite
 
     - name: Taint master
-      command: kubectl taint node master1 node-role.kubernetes.io/control-plane=NoSchedule --overwrite
+      command: kubectl taint node master1 node-role.kubernetes.io/control-plane=:NoSchedule --overwrite
