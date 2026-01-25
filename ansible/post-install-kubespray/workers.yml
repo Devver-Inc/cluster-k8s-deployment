@@ -1,6 +1,6 @@
 ---
 - name: Configuration stockage workers
-  hosts: kube_node
+  hosts: worker_node
   become: true
 
   tasks:
