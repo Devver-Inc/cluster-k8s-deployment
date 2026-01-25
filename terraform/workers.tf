@@ -19,7 +19,7 @@ resource "proxmox_vm_qemu" "workers" {
   cores = 4
   sockets = 1
 }
-  memory      = 4096
+  memory      = 6144
   clone       = "debian13-cloudinit"
   scsihw      = "virtio-scsi-single"
   vm_state    = "running"
@@ -69,4 +69,6 @@ resource "proxmox_vm_qemu" "workers" {
     model  = "virtio"
     tag    = 45
   }
+
+  tags = ["devver", "K8s", "worker"]
 }
