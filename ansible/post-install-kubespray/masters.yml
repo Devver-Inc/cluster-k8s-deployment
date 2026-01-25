@@ -1,0 +1,40 @@
+---
+- name: Configuration du master Kubernetes
+  hosts: kube_control_plane
+  become: true
+
+  tasks:
+    - name: Installer kubectl
+      apt:
+        name: kubectl
+        state: present
+        update_cache: yes
+
+    - name: Créer dossier kubeconfig
+      file:
+        path: /home/{{ ansible_user }}/.kube
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: 0755
+
+    - name: Copier admin.conf
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /home/{{ ansible_user }}/.kube/config
+        remote_src: true
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: 0644
+
+    - name: Label worker1
+      command: kubectl label node worker1 node-role.kubernetes.io/worker= --overwrite
+
+    - name: Label worker2
+      command: kubectl label node worker2 node-role.kubernetes.io/worker= --overwrite
+
+    - name: Label worker3
+      command: kubectl label node worker3 node-role.kubernetes.io/worker= --overwrite
+
+    - name: Taint master
+      command: kubectl taint node master1 node-role.kubernetes.io/control-plane=NoSchedule --overwrite

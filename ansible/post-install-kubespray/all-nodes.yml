@@ -1,0 +1,24 @@
+---
+- name: Configuration DNS sur tous les noeuds
+  hosts: all
+  become: true
+
+  tasks:
+    - name: Désactiver systemd-resolved
+      systemd:
+        name: systemd-resolved
+        state: stopped
+        enabled: false
+
+    - name: Supprimer resolv.conf
+      file:
+        path: /etc/resolv.conf
+        state: absent
+
+    - name: Créer resolv.conf
+      copy:
+        dest: /etc/resolv.conf
+        content: |
+          nameserver 8.8.8.8
+          nameserver 1.1.1.1
+        mode: 0644
