@@ -22,3 +22,19 @@
           nameserver 8.8.8.8
           nameserver 1.1.1.1
         mode: 0644
+  
+    - name: Déactivation de l'IPv6 (copie du fichier de configuration)
+      copy:
+        dest: /etc/sysctl.d/99-disable-ipv6.conf
+        content: |
+          net.ipv6.conf.all.disable_ipv6 = 1
+          net.ipv6.conf.default.disable_ipv6 = 1
+          net.ipv6.conf.lo.disable_ipv6 = 1
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Application des modifications sysctl (IPv6)
+      command: sysctl --system
+      register: sysctl_apply
+      changed_when: "'disabled' in sysctl_apply.stdout or sysctl_apply.rc == 0"
