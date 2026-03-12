@@ -56,3 +56,11 @@ output "provisioned_ips" {
     [local.lb_ip]
   )
 }
+
+output "mw_ip_base" {
+  value = local.mw_ip_base
+}
+
+output "lb_ip_offset" {
+  value = local.lb_ip_offset
+}

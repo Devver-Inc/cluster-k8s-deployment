@@ -3,67 +3,80 @@
 # Rôle K8s : control-plane + worker
 #############################################
 
-resource "proxmox_vm_qemu" "master_worker" {
+resource "proxmox_virtual_environment_vm" "master_worker" {
   for_each = local.mw_nodes
 
-  # VMID : 3e octet + 4e octet de l'IP (ex: 192.168.45.100 → 45100)
-  vmid        = tonumber("${split(".", each.value.ip)[2]}${split(".", each.value.ip)[3]}")
+  # VMID : calculé automatiquement de l'IP (3e octet + 4e octet)
+  # Ex: 192.168.45.110 → VMID 45110
+  # Permet un mapping déterministe IP → VMID
+  vm_id       = tonumber("${split(".", each.value.ip)[2]}${split(".", each.value.ip)[3]}")
   name        = each.value.name
-  target_node = var.target_node
-  agent       = 1
-  clone       = var.vm_template
-  scsihw      = "virtio-scsi-single"
-  vm_state    = "running"
-  automatic_reboot = true
+  node_name   = var.target_node
+  started     = true
+  description = "Kubernetes Master+Worker - ${var.cluster_env}"
 
   cpu {
     cores   = var.mw_cores
     sockets = 1
-  }
-  memory = var.mw_memory_mb
-
-  cicustom   = "vendor=local:snippets/qemu-guest-agent.yml"
-  ciupgrade  = true
-  skip_ipv6  = true
-  ciuser     = var.vm_user
-  nameserver = var.nameservers
-  ipconfig0  = "ip=${each.value.ip}/24,gw=${var.gateway}"
-  sshkeys    = var.ssh_public_key
-
-  serial { id = 0 }
-
-  disks {
-    scsi {
-      scsi0 {
-        disk {
-          storage = var.storage
-          size    = var.mw_disk_os_gb
-        }
-      }
-      scsi1 {
-        disk {
-          storage = var.storage
-          size    = var.mw_disk_data_gb
-        }
-      }
-    }
-    ide {
-      ide1 {
-        cloudinit {
-          storage = var.storage
-        }
-      }
-    }
+    type    = "x86-64-v2-AES"
   }
 
-  network {
-    id     = 0
+  memory {
+    dedicated = var.mw_memory_mb
+  }
+
+  clone {
+    vm_id = var.vm_template_id
+    full  = true
+  }
+
+  agent {
+    enabled = true
+    timeout = "15m"
+    trim    = false
+    type    = "virtio"
+  }
+
+  scsi_hardware = "virtio-scsi-single"
+  boot_order    = ["scsi0"]
+
+  disk {
+    datastore_id = var.storage
+    size         = var.mw_disk_os_gb
+    interface    = "scsi0"
+    iothread     = true
+  }
+
+  disk {
+    datastore_id = var.storage
+    size         = var.mw_disk_data_gb
+    interface    = "scsi1"
+    iothread     = true
+  }
+
+  network_device {
     bridge = var.network_bridge
-    model  = "virtio"
-    tag    = var.network_tag
+    vlan_id = var.network_tag
   }
 
-  tags = "${local.tag_base};master-worker"
+  initialization {
+    datastore_id         = var.storage
+    vendor_data_file_id  = "local:snippets/qemu-guest-agent.yml"
+
+    ip_config {
+      ipv4 {
+        address = "${each.value.ip}/24"
+        gateway = var.gateway
+      }
+    }
+
+    user_account {
+      username = var.vm_user
+      keys     = [var.ssh_public_key]
+    }
+  }
+
+  tags = [local.tag_base, "master-worker"]
 }
 
 #############################################
@@ -71,64 +84,75 @@ resource "proxmox_vm_qemu" "master_worker" {
 # Rôle K8s : worker uniquement
 #############################################
 
-resource "proxmox_vm_qemu" "worker" {
+resource "proxmox_virtual_environment_vm" "worker" {
   for_each = local.w_nodes
 
-  vmid        = tonumber("${split(".", each.value.ip)[2]}${split(".", each.value.ip)[3]}")
+  vm_id       = tonumber("${split(".", each.value.ip)[2]}${split(".", each.value.ip)[3]}")
   name        = each.value.name
-  target_node = var.target_node
-  agent       = 1
-  clone       = var.vm_template
-  scsihw      = "virtio-scsi-single"
-  vm_state    = "running"
-  automatic_reboot = true
+  node_name   = var.target_node
+  started     = true
+  description = "Kubernetes Worker - ${var.cluster_env}"
 
   cpu {
     cores   = var.w_cores
     sockets = 1
-  }
-  memory = var.w_memory_mb
-
-  cicustom   = "vendor=local:snippets/qemu-guest-agent.yml"
-  ciupgrade  = true
-  skip_ipv6  = true
-  ciuser     = var.vm_user
-  nameserver = var.nameservers
-  ipconfig0  = "ip=${each.value.ip}/24,gw=${var.gateway}"
-  sshkeys    = var.ssh_public_key
-
-  serial { id = 0 }
-
-  disks {
-    scsi {
-      scsi0 {
-        disk {
-          storage = var.storage
-          size    = var.w_disk_os_gb
-        }
-      }
-      scsi1 {
-        disk {
-          storage = var.storage
-          size    = var.w_disk_data_gb
-        }
-      }
-    }
-    ide {
-      ide1 {
-        cloudinit {
-          storage = var.storage
-        }
-      }
-    }
+    type    = "x86-64-v2-AES"
   }
 
-  network {
-    id     = 0
+  memory {
+    dedicated = var.w_memory_mb
+  }
+
+  clone {
+    vm_id = var.vm_template_id
+    full  = true
+  }
+
+  agent {
+    enabled = true
+    timeout = "15m"
+    trim    = false
+    type    = "virtio"
+  }
+
+  scsi_hardware = "virtio-scsi-single"
+  boot_order    = ["scsi0"]
+
+  disk {
+    datastore_id = var.storage
+    size         = var.w_disk_os_gb
+    interface    = "scsi0"
+    iothread     = true
+  }
+
+  disk {
+    datastore_id = var.storage
+    size         = var.w_disk_data_gb
+    interface    = "scsi1"
+    iothread     = true
+  }
+
+  network_device {
     bridge = var.network_bridge
-    model  = "virtio"
-    tag    = var.network_tag
+    vlan_id = var.network_tag
   }
 
-  tags = "${local.tag_base};worker"
+  initialization {
+    datastore_id         = var.storage
+    vendor_data_file_id  = "local:snippets/qemu-guest-agent.yml"
+
+    ip_config {
+      ipv4 {
+        address = "${each.value.ip}/24"
+        gateway = var.gateway
+      }
+    }
+
+    user_account {
+      username = var.vm_user
+      keys     = [var.ssh_public_key]
+    }
+  }
+
+  tags = [local.tag_base, "worker"]
 }

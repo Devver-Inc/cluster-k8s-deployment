@@ -1,0 +1,9 @@
+cluster: DEVVER-K8S-PROD
+env: prod
+status: active
+loadbalancer_ip: 192.168.45.81
+provisioned_ips: ["192.168.45.110","192.168.45.111","192.168.45.112","192.168.45.160","192.168.45.81"]
+master_worker_count: 3
+worker_count: 1
+mw_ip_base: 110
+lb_ip_offset: 81

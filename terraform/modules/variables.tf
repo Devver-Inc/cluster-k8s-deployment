@@ -3,11 +3,11 @@
 #############################################
 
 variable "cluster_env" {
-  description = "Environnement : prod, dev ou test"
+  description = "Environnement : prod, staging, dev ou test"
   type        = string
   validation {
-    condition     = contains(["prod", "dev", "test"], var.cluster_env)
-    error_message = "cluster_env doit être 'prod', 'dev' ou 'test'."
+    condition     = contains(["prod", "staging", "dev", "test"], var.cluster_env)
+    error_message = "cluster_env doit être: prod, staging, dev ou test"
   }
 }
 
@@ -35,14 +35,38 @@ variable "subnet" {
   type        = string
 }
 
-variable "mw_ip_base" {
-  description = "4e octet de départ pour les MW de ce cluster (ex: 100 → .100, .101...)"
-  type        = number
+# Plages IPs : calculées dans locals.tf basées sur cluster_env
+variable "mw_ip_base_prod" {
+  type    = number
+  default = 110
 }
-
-variable "lb_ip_offset" {
-  description = "4e octet pour le load balancer de ce cluster (ex: 80 → .80)"
-  type        = number
+variable "lb_ip_offset_prod" {
+  type    = number
+  default = 81
+}
+variable "mw_ip_base_staging" {
+  type    = number
+  default = 120
+}
+variable "lb_ip_offset_staging" {
+  type    = number
+  default = 82
+}
+variable "mw_ip_base_dev" {
+  type    = number
+  default = 130
+}
+variable "lb_ip_offset_dev" {
+  type    = number
+  default = 83
+}
+variable "mw_ip_base_test" {
+  type    = number
+  default = 100
+}
+variable "lb_ip_offset_test" {
+  type    = number
+  default = 80
 }
 
 variable "gateway" {
@@ -69,10 +93,18 @@ variable "target_node" {
 
 variable "storage" {
   type = string
+  default = "SSD-PVE-DATA"
 }
 
 variable "vm_template" {
-  type = string
+  description = "Nom du template VM à cloner"
+  type        = string
+  default     = "debian13-cloudinit"
+}
+
+variable "vm_template_id" {
+  description = "ID numérique du template VM Proxmox à cloner"
+  type        = number
 }
 
 # ---- Cloud-init ----
@@ -99,13 +131,15 @@ variable "mw_memory_mb" {
 }
 
 variable "mw_disk_os_gb" {
-  type    = string
-  default = "40G"
+  description = "Taille disque OS en GB (ex: 40)"
+  type        = number
+  default     = 40
 }
 
 variable "mw_disk_data_gb" {
-  type    = string
-  default = "150G"
+  description = "Taille disque data en GB (ex: 150)"
+  type        = number
+  default     = 150
 }
 
 # ---- Ressources Worker seul ----
@@ -121,11 +155,13 @@ variable "w_memory_mb" {
 }
 
 variable "w_disk_os_gb" {
-  type    = string
-  default = "40G"
+  description = "Taille disque OS en GB (ex: 40)"
+  type        = number
+  default     = 40
 }
 
 variable "w_disk_data_gb" {
-  type    = string
-  default = "150G"
+  description = "Taille disque data en GB (ex: 150)"
+  type        = number
+  default     = 150
 }

@@ -1,122 +1,31 @@
 #############################################
-# Variables PAR CLUSTER
-# Seuls ces paramètres sont à définir
-# dans chaque terraform.tfvars
+# Variables PAR CLUSTER — ESSENTIELLES SEULEMENT
+# (Tous les autres paramètres ont des défauts dans variables-global.tf)
 #############################################
 
-# ---- Identité ----
-
 variable "cluster_env" {
-  type = string
+  description = "Environnement cluster: prod, staging, dev, test"
+  type        = string
+  
+  validation {
+    condition     = contains(["prod", "staging", "dev", "test"], var.cluster_env)
+    error_message = "cluster_env doit être: prod, staging, dev ou test"
+  }
 }
 
-# ---- Topologie ----
-
 variable "master_worker_count" {
-  type    = number
-  default = 3
+  description = "Nombre de nœuds Master+Worker (minimum 3 pour HA)"
+  type        = number
+  default     = 3
+  
+  validation {
+    condition     = var.master_worker_count >= 3
+    error_message = "Minimum 3 nœuds Master+Worker requis pour Kubernetes HA"
+  }
 }
 
 variable "worker_count" {
-  type    = number
-  default = 0
-}
-
-# ---- Adressage du cluster ----
-# mw_ip_base  : 4e octet de départ pour les MW
-#               MW-1 = subnet.mw_ip_base
-#               MW-2 = subnet.mw_ip_base + 1
-#               W-1  = subnet.mw_ip_base + 50
-#               W-2  = subnet.mw_ip_base + 51
-# lb_ip_offset: 4e octet pour le load balancer
-#
-# Plages globales disponibles :
-#   VMs : .100 → .199  (réservez 50 IPs par cluster)
-#   LB  : .80  → .98
-#
-# Exemple cluster TEST  : mw_ip_base=100, lb_ip_offset=80
-# Exemple cluster PROD  : mw_ip_base=110, lb_ip_offset=81
-# Exemple cluster DEV   : mw_ip_base=120, lb_ip_offset=82
-
-variable "mw_ip_base" {
-  description = "4e octet de départ pour les VMs de ce cluster"
+  description = "Nombre de nœuds Worker purs (facultatif)"
   type        = number
-}
-
-variable "lb_ip_offset" {
-  description = "4e octet pour le load balancer de ce cluster"
-  type        = number
-}
-
-# ---- Proxmox ----
-
-variable "target_node" {
-  type    = string
-  default = "PROXMOX-PVE1"
-}
-
-variable "storage" {
-  type    = string
-  default = "SSD-PVE-DATA"
-}
-
-variable "vm_template" {
-  type    = string
-  default = "debian13-cloudinit"
-}
-
-# ---- Cloud-init ----
-
-variable "vm_user" {
-  type    = string
-  default = "devver"
-}
-
-variable "ssh_public_key" {
-  type      = string
-  sensitive = true
-}
-
-# ---- Ressources Master+Worker ----
-
-variable "mw_cores" {
-  type    = number
-  default = 4
-}
-
-variable "mw_memory_mb" {
-  type    = number
-  default = 3072
-}
-
-variable "mw_disk_os_gb" {
-  type    = string
-  default = "40G"
-}
-
-variable "mw_disk_data_gb" {
-  type    = string
-  default = "150G"
-}
-
-# ---- Ressources Worker seul ----
-
-variable "w_cores" {
-  type    = number
-  default = 4
-}
-
-variable "w_memory_mb" {
-  type    = number
-  default = 3072
-}
-
-variable "w_disk_os_gb" {
-  type    = string
-  default = "40G"
-}
-
-variable "w_disk_data_gb" {
-  type    = string
-  default = "150G"
+  default     = 0
 }
