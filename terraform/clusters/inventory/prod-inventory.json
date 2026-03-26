@@ -1,0 +1,1 @@
+{"cluster_env":"prod","master_workers":[{"ansible_user":"devver","ip":"192.168.45.110","name":"devver-k8s-prod-mw-1","role":"master-worker"},{"ansible_user":"devver","ip":"192.168.45.111","name":"devver-k8s-prod-mw-2","role":"master-worker"},{"ansible_user":"devver","ip":"192.168.45.112","name":"devver-k8s-prod-mw-3","role":"master-worker"}],"workers":[]}

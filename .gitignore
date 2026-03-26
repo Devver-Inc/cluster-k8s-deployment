@@ -1,0 +1,64 @@
+# Terraform state files
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl
+
+# Terraform directories
+.terraform/
+.terraform.d/
+
+# Terraform plan files
+*.tfplan
+*.tfplan.json
+
+# Terraform variable files (with secrets)
+*.tfvars
+!*.tfvars.example
+!example-prod/terraform.tfvars.example
+
+# Terraform logs and crashes
+crash.log
+crash.*.log
+terraform.log
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+.env
+
+# OS-specific
+Thumbs.db
+desktop.ini
+
+# Backups
+*.backup
+*.bak
+
+# Local overrides
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Temporary files
+*.tmp
+*.temp
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+
+# Ansible
+*.retry
+
+# SSH keys (sensitive)
+*.pem
+*.key
+*.pub
