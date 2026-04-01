@@ -1,0 +1,189 @@
+ansible  README.md  terraform
+❯ cd ansible
+❯ ls
+inventory.ini  post-install-kubespray
+❯ git switch refactor-tf
+branch 'refactor-tf' set up to track 'origin/refactor-tf'.
+Switched to a new branch 'refactor-tf'
+❯ git pull
+Already up to date.
+❯ ls
+inventory.ini  kubespray  post-install-kubespray  README.md
+❯ cd
+❯ source devver-env/bin/activate
+❯ cd cluster-k8s-deployment/terraform/clusters/inventory
+❯ ls
+prod-cluster.yaml  prod-inventory.ini  prod-inventory.json
+❯ ansible-playbook -i prod-inventory.ini /home/victor/cluster-k8s-deployment/ansible/post-install-kubespray/all-nodes.yml
+
+PLAY [Configuration DNS sur tous les noeuds] ************************************************************************************************************************************************************************************************************************************************************************************************************************************************************
+
+TASK [Gathering Facts] **********************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************
+fatal: [devver-k8s-prod-mw-2]: UNREACHABLE! => {"changed": false, "msg": "Failed to connect to the host via ssh: @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\r\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\r\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\r\nIT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!\r\nSomeone could be eavesdropping on you right now (man-in-the-middle attack)!\r\nIt is also possible that a host key has just been changed.\r\nThe fingerprint for the ED25519 key sent by the remote host is\nSHA256:73QIedeZ59bzmGiDx2fildAXmV8RFn5wR4+AoRSufP0.\r\nPlease contact your system administrator.\r\nAdd correct host key in /home/victor/.ssh/known_hosts to get rid of this message.\r\nOffending ECDSA key in /home/victor/.ssh/known_hosts:61\r\n  remove with:\r\n  ssh-keygen -f '/home/victor/.ssh/known_hosts' -R '192.168.45.111'\r\nHost key for 192.168.45.111 has changed and you have requested strict checking.\r\nHost key verification failed.", "unreachable": true}
+fatal: [devver-k8s-prod-mw-3]: UNREACHABLE! => {"changed": false, "msg": "Failed to connect to the host via ssh: @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\r\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\r\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\r\nIT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!\r\nSomeone could be eavesdropping on you right now (man-in-the-middle attack)!\r\nIt is also possible that a host key has just been changed.\r\nThe fingerprint for the ED25519 key sent by the remote host is\nSHA256:ua5MhrKsIP74zSCOy8ODqF0pw70qoMmFE9ZZMpWi2is.\r\nPlease contact your system administrator.\r\nAdd correct host key in /home/victor/.ssh/known_hosts to get rid of this message.\r\nOffending ECDSA key in /home/victor/.ssh/known_hosts:64\r\n  remove with:\r\n  ssh-keygen -f '/home/victor/.ssh/known_hosts' -R '192.168.45.112'\r\nHost key for 192.168.45.112 has changed and you have requested strict checking.\r\nHost key verification failed.", "unreachable": true}
+fatal: [devver-k8s-prod-mw-1]: UNREACHABLE! => {"changed": false, "msg": "Failed to connect to the host via ssh: devver@192.168.45.110: Permission denied (publickey).", "unreachable": true}
+
+PLAY RECAP **********************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************
+devver-k8s-prod-mw-1       : ok=0    changed=0    unreachable=1    failed=0    skipped=0    rescued=0    ignored=0   
+devver-k8s-prod-mw-2       : ok=0    changed=0    unreachable=1    failed=0    skipped=0    rescued=0    ignored=0   
+devver-k8s-prod-mw-3       : ok=0    changed=0    unreachable=1    failed=0    skipped=0    rescued=0    ignored=0   
+
+❯ ansible-playbook -i prod-inventory.ini /home/victor/cluster-k8s-deployment/ansible/post-install-kubespray/all-nodes.yml --private-key=/home/victor/.ssh/devver-infra
+
+PLAY [Configuration DNS sur tous les noeuds] ************************************************************************************************************************************************************************************************************************************************************************************************************************************************************
+
+TASK [Gathering Facts] **********************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************
+fatal: [devver-k8s-prod-mw-2]: UNREACHABLE! => {"changed": false, "msg": "Failed to connect to the host via ssh: @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\r\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\r\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\r\nIT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!\r\nSomeone could be eavesdropping on you right now (man-in-the-middle attack)!\r\nIt is also possible that a host key has just been changed.\r\nThe fingerprint for the ED25519 key sent by the remote host is\nSHA256:73QIedeZ59bzmGiDx2fildAXmV8RFn5wR4+AoRSufP0.\r\nPlease contact your system administrator.\r\nAdd correct host key in /home/victor/.ssh/known_hosts to get rid of this message.\r\nOffending ECDSA key in /home/victor/.ssh/known_hosts:61\r\n  remove with:\r\n  ssh-keygen -f '/home/victor/.ssh/known_hosts' -R '192.168.45.111'\r\nHost key for 192.168.45.111 has changed and you have requested strict checking.\r\nHost key verification failed.", "unreachable": true}
+fatal: [devver-k8s-prod-mw-3]: UNREACHABLE! => {"changed": false, "msg": "Failed to connect to the host via ssh: @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\r\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\r\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\r\nIT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!\r\nSomeone could be eavesdropping on you right now (man-in-the-middle attack)!\r\nIt is also possible that a host key has just been changed.\r\nThe fingerprint for the ED25519 key sent by the remote host is\nSHA256:ua5MhrKsIP74zSCOy8ODqF0pw70qoMmFE9ZZMpWi2is.\r\nPlease contact your system administrator.\r\nAdd correct host key in /home/victor/.ssh/known_hosts to get rid of this message.\r\nOffending ECDSA key in /home/victor/.ssh/known_hosts:64\r\n  remove with:\r\n  ssh-keygen -f '/home/victor/.ssh/known_hosts' -R '192.168.45.112'\r\nHost key for 192.168.45.112 has changed and you have requested strict checking.\r\nHost key verification failed.", "unreachable": true}
+[WARNING]: Platform linux on host devver-k8s-prod-mw-1 is using the discovered Python interpreter at /usr/bin/python3, but future installation of another Python interpreter could change the meaning of that path. See https://docs.ansible.com/ansible-core/2.17/reference_appendices/interpreter_discovery.html for more information.
+ok: [devver-k8s-prod-mw-1]
+
+TASK [Désactiver systemd-resolved] **********************************************************************************************************************************************************************************************************************************************************************************************************************************************************************
+changed: [devver-k8s-prod-mw-1]
+
+TASK [Supprimer resolv.conf] ****************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************
+changed: [devver-k8s-prod-mw-1]
+
+TASK [Créer resolv.conf] ********************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************
+changed: [devver-k8s-prod-mw-1]
+
+TASK [Déactivation de l'IPv6 (copie du fichier de configuration)] ***************************************************************************************************************************************************************************************************************************************************************************************************************************************
+changed: [devver-k8s-prod-mw-1]
+
+TASK [Application des modifications sysctl (IPv6)] ******************************************************************************************************************************************************************************************************************************************************************************************************************************************************
+changed: [devver-k8s-prod-mw-1]
+
+PLAY RECAP **********************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************
+devver-k8s-prod-mw-1       : ok=6    changed=5    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+devver-k8s-prod-mw-2       : ok=0    changed=0    unreachable=1    failed=0    skipped=0    rescued=0    ignored=0   
+devver-k8s-prod-mw-3       : ok=0    changed=0    unreachable=1    failed=0    skipped=0    rescued=0    ignored=0   
+
+❯ ls /home/victor/.ssh
+devver-infra  devver-infra.pub  id_ed25519  id_ed25519.pub  known_hosts  known_hosts.old  tp-linux  tp-linux.pub  vr-infra  vr-infra.pub  yes  yes.pub
+❯ ls /home/victor/.ssh
+devver-infra  devver-infra.pub  id_ed25519  id_ed25519.pub  known_hosts  known_hosts.old  tp-linux  tp-linux.pub  vr-infra  vr-infra.pub  yes  yes.pub
+❯ nano /home/victor/.ssh/known_hosts
+❯ ls /home/victor/.ssh
+❯ ssh devver@192.168.45.111
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!
+Someone could be eavesdropping on you right now (man-in-the-middle attack)!
+It is also possible that a host key has just been changed.
+The fingerprint for the ED25519 key sent by the remote host is
+SHA256:73QIedeZ59bzmGiDx2fildAXmV8RFn5wR4+AoRSufP0.
+Please contact your system administrator.
+Add correct host key in /home/victor/.ssh/known_hosts to get rid of this message.
+Offending ECDSA key in /home/victor/.ssh/known_hosts:61
+  remove with:
+  ssh-keygen -f '/home/victor/.ssh/known_hosts' -R '192.168.45.111'
+Host key for 192.168.45.111 has changed and you have requested strict checking.
+Host key verification failed.
+❯ ssh-keygen -f '/home/victor/.ssh/known_hosts' -R '192.168.45.111'
+# Host 192.168.45.111 found: line 59
+# Host 192.168.45.111 found: line 60
+# Host 192.168.45.111 found: line 61
+/home/victor/.ssh/known_hosts updated.
+Original contents retained as /home/victor/.ssh/known_hosts.old
+❯ ssh-keygen -f '/home/victor/.ssh/known_hosts' -R '192.168.45.112'
+# Host 192.168.45.112 found: line 59
+# Host 192.168.45.112 found: line 60
+# Host 192.168.45.112 found: line 61
+/home/victor/.ssh/known_hosts updated.
+Original contents retained as /home/victor/.ssh/known_hosts.old
+❯ ansible-playbook -i prod-inventory.ini /home/victor/cluster-k8s-deployment/ansible/post-install-kubespray/all-nodes.yml --private-key=/home/victor/.ssh/devver-infra
+
+PLAY [Configuration DNS sur tous les noeuds] ************************************************************************************************************************************************************************************************************************************************************************************************************************************************************
+
+TASK [Gathering Facts] **********************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************
+The authenticity of host '192.168.45.111 (192.168.45.111)' can't be established.
+ED25519 key fingerprint is SHA256:73QIedeZ59bzmGiDx2fildAXmV8RFn5wR4+AoRSufP0.
+This key is not known by any other names.
+The authenticity of host '192.168.45.112 (192.168.45.112)' can't be established.
+ED25519 key fingerprint is SHA256:ua5MhrKsIP74zSCOy8ODqF0pw70qoMmFE9ZZMpWi2is.
+This key is not known by any other names.
+Are you sure you want to continue connecting (yes/no/[fingerprint])? [WARNING]: Platform linux on host devver-k8s-prod-mw-1 is using the discovered Python interpreter at /usr/bin/python3, but future installation of another Python interpreter could change the meaning of that path. See https://docs.ansible.com/ansible-core/2.17/reference_appendices/interpreter_discovery.html for more information.
+ok: [devver-k8s-prod-mw-1]
+yes
+[WARNING]: Platform linux on host devver-k8s-prod-mw-2 is using the discovered Python interpreter at /usr/bin/python3, but future installation of another Python interpreter could change the meaning of that path. See https://docs.ansible.com/ansible-core/2.17/reference_appendices/interpreter_discovery.html for more information.
+ok: [devver-k8s-prod-mw-2]
+yes
+[WARNING]: Platform linux on host devver-k8s-prod-mw-3 is using the discovered Python interpreter at /usr/bin/python3, but future installation of another Python interpreter could change the meaning of that path. See https://docs.ansible.com/ansible-core/2.17/reference_appendices/interpreter_discovery.html for more information.
+ok: [devver-k8s-prod-mw-3]
+
+TASK [Désactiver systemd-resolved] **********************************************************************************************************************************************************************************************************************************************************************************************************************************************************************
+ok: [devver-k8s-prod-mw-1]
+changed: [devver-k8s-prod-mw-2]
+changed: [devver-k8s-prod-mw-3]
+
+TASK [Supprimer resolv.conf] ****************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************
+changed: [devver-k8s-prod-mw-3]
+changed: [devver-k8s-prod-mw-1]
+changed: [devver-k8s-prod-mw-2]
+
+TASK [Créer resolv.conf] ********************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************
+changed: [devver-k8s-prod-mw-3]
+changed: [devver-k8s-prod-mw-1]
+changed: [devver-k8s-prod-mw-2]
+
+TASK [Déactivation de l'IPv6 (copie du fichier de configuration)] ***************************************************************************************************************************************************************************************************************************************************************************************************************************************
+ok: [devver-k8s-prod-mw-1]
+changed: [devver-k8s-prod-mw-3]
+changed: [devver-k8s-prod-mw-2]
+
+TASK [Application des modifications sysctl (IPv6)] ******************************************************************************************************************************************************************************************************************************************************************************************************************************************************
+changed: [devver-k8s-prod-mw-1]
+changed: [devver-k8s-prod-mw-2]
+changed: [devver-k8s-prod-mw-3]
+
+PLAY RECAP **********************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************************
+devver-k8s-prod-mw-1       : ok=6    changed=3    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+devver-k8s-prod-mw-2       : ok=6    changed=5    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+devver-k8s-prod-mw-3       : ok=6    changed=5    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+
+
+❯ ansible-playbook -i prod-inventory.ini /home/victor/cluster-k8s-deployment/ansible/post-install-kubespray/masters.yml --private-key=/home/victor/.ssh/devver-infra
+
+PLAY [Configuration du master Kubernetes] ********************************************************************************************************************************************************************************************************************************************************************************************************************************
+
+TASK [Gathering Facts] ***************************************************************************************************************************************************************************************************************************************************************************************************************************************************
+[WARNING]: Platform linux on host devver-k8s-prod-mw-1 is using the discovered Python interpreter at /usr/bin/python3, but future installation of another Python interpreter could change the meaning of that path. See https://docs.ansible.com/ansible-core/2.17/reference_appendices/interpreter_discovery.html for more information.
+ok: [devver-k8s-prod-mw-1]
+[WARNING]: Platform linux on host devver-k8s-prod-mw-2 is using the discovered Python interpreter at /usr/bin/python3, but future installation of another Python interpreter could change the meaning of that path. See https://docs.ansible.com/ansible-core/2.17/reference_appendices/interpreter_discovery.html for more information.
+ok: [devver-k8s-prod-mw-2]
+[WARNING]: Platform linux on host devver-k8s-prod-mw-3 is using the discovered Python interpreter at /usr/bin/python3, but future installation of another Python interpreter could change the meaning of that path. See https://docs.ansible.com/ansible-core/2.17/reference_appendices/interpreter_discovery.html for more information.
+ok: [devver-k8s-prod-mw-3]
+
+TASK [Installer kubectl] *************************************************************************************************************************************************************************************************************************************************************************************************************************************************
+changed: [devver-k8s-prod-mw-3]
+changed: [devver-k8s-prod-mw-1]
+changed: [devver-k8s-prod-mw-2]
+
+TASK [Créer dossier kubeconfig] ******************************************************************************************************************************************************************************************************************************************************************************************************************************************
+changed: [devver-k8s-prod-mw-2]
+changed: [devver-k8s-prod-mw-3]
+changed: [devver-k8s-prod-mw-1]
+
+TASK [Copier admin.conf] *************************************************************************************************************************************************************************************************************************************************************************************************************************************************
+changed: [devver-k8s-prod-mw-2]
+changed: [devver-k8s-prod-mw-1]
+changed: [devver-k8s-prod-mw-3]
+
+TASK [Label worker1] *****************************************************************************************************************************************************************************************************************************************************************************************************************************************************
+fatal: [devver-k8s-prod-mw-1]: FAILED! => {"changed": true, "cmd": ["kubectl", "label", "node", "worker1", "node-role.kubernetes.io/worker=", "--overwrite"], "delta": "0:00:00.149167", "end": "2026-03-31 11:00:42.473104", "msg": "non-zero return code", "rc": 1, "start": "2026-03-31 11:00:42.323937", "stderr": "Error from server (NotFound): nodes \"worker1\" not found", "stderr_lines": ["Error from server (NotFound): nodes \"worker1\" not found"], "stdout": "", "stdout_lines": []}
+fatal: [devver-k8s-prod-mw-2]: FAILED! => {"changed": true, "cmd": ["kubectl", "label", "node", "worker1", "node-role.kubernetes.io/worker=", "--overwrite"], "delta": "0:00:00.799815", "end": "2026-03-31 11:00:43.195927", "msg": "non-zero return code", "rc": 1, "start": "2026-03-31 11:00:42.396112", "stderr": "Error from server (NotFound): nodes \"worker1\" not found", "stderr_lines": ["Error from server (NotFound): nodes \"worker1\" not found"], "stdout": "", "stdout_lines": []}
+fatal: [devver-k8s-prod-mw-3]: FAILED! => {"changed": true, "cmd": ["kubectl", "label", "node", "worker1", "node-role.kubernetes.io/worker=", "--overwrite"], "delta": "0:00:00.858624", "end": "2026-03-31 11:00:43.299341", "msg": "non-zero return code", "rc": 1, "start": "2026-03-31 11:00:42.440717", "stderr": "Error from server (NotFound): nodes \"worker1\" not found", "stderr_lines": ["Error from server (NotFound): nodes \"worker1\" not found"], "stdout": "", "stdout_lines": []}
+
+PLAY RECAP ***************************************************************************************************************************************************************************************************************************************************************************************************************************************************************
+devver-k8s-prod-mw-1       : ok=4    changed=3    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0   
+devver-k8s-prod-mw-2       : ok=4    changed=3    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0   
+devver-k8s-prod-mw-3       : ok=4    changed=3    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0   
+
+❯ ansible-playbook -i prod-inventory.ini /home/victor/cluster-k8s-deployment/ansible/post-install-kubespray/workers.yml --private-key=/home/victor/.ssh/devver-infra
+[WARNING]: Could not match supplied host pattern, ignoring: worker_node
+
+PLAY [Configuration stockage workers] ************************************************************************************************************************************************************************************************************************************************************************************************************************************
+skipping: no hosts matched
+
+PLAY RECAP ***************************************************************************************************************************************************************************************************************************************************************************************************************************************************************
