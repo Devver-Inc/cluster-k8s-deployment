@@ -22,15 +22,16 @@ A rajouter dans les labels master/worker > kubectl label nodes devver-k8s-prod-m
 
 Partie Kubernetes
 
-Restaurer tout depuis git et PVC depuis sauvegarde
+Restaurer tout depuis git (pas applicatif seulement la stack de base) et PVC depuis sauvegarde
 
 comment gérer le rename des ingress ?
 
-revoir la partir secret et ingress
+revoir la partir secret et ingress , reflector
 
 secrete external DNS a mettre avec celui de traefik
 
 Ordre de deploiement
 metallb > certmanager > traefik > external-nds >longhon
 
+gestion des kubeconfig VIP pour api server
 
