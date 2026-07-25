@@ -37,7 +37,7 @@ vim ../clusters/example-prod/terraform.tfvars
 
 ```bash
 # 3. Exporter les secrets (À FAIRE À CHAQUE SESSION)
-export TF_VAR_proxmox_api_token_secret="your-token-here"
+export TF_VAR_proxmox_api_token_secret="your-token-secret"
 export TF_VAR_ssh_public_key="ssh-ed25519 AAAA... user@host"
 
 # Vérifier:

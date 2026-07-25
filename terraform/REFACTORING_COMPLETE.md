@@ -84,7 +84,7 @@ terraform init                                   # Télécharger nouveau provide
 
 ```bash
 # Exporter les secrets
-export TF_VAR_proxmox_api_token_secret="your-token-here"
+export TF_VAR_proxmox_api_token_secret="your-token-secret"
 export TF_VAR_ssh_public_key="ssh-ed25519 AAAA... user@host"
 
 # Plan (sans changements)

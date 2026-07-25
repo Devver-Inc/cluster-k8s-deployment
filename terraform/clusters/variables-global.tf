@@ -14,7 +14,7 @@ variable "proxmox_api_token" {
   type        = string
   sensitive   = true
   description = "Format: user@realm!tokenid=secret (ex: root@pam!devver=xxxxxxxx-xxxx...)"
-  default = "root@pam!devver=your-token-here"
+  default = "your-token-here"
 }
 
 # ---- Réseau global ----

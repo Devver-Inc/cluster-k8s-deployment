@@ -16,7 +16,7 @@ chmod +x find-template-id.sh
 Le script demande:
 1. **URL Proxmox**: `https://192.168.5.3:8006`
 2. **Token API ID**: `root@pam!devver`
-3. **Token API Secret**: `your-token-here`
+3. **Token API Secret**: `your-token-secret`
 4. **Nœud Proxmox**: `PROXMOX-PVE1` (où se trouvent les templates)
 5. **Nom du template**: `debian13-cloudinit` (ce qu'on cherche)
 
