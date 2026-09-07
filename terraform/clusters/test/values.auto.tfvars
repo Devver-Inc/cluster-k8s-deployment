@@ -13,7 +13,7 @@ tags                     = ["devver", "test"]
 proxmox_node  = "PROXMOX-PVE1"
 datastore_id  = "SSD-PVE-DATA"
 template_name = "rocky9-cloud-template"
-
+#
 # Ressources personnalisables indépendamment par org/environnement (valeurs par
 # défaut dans module/variables.tf si omises ici) :
 # master_cpu_cores = 4
