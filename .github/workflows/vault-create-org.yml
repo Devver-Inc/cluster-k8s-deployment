@@ -1,6 +1,9 @@
 name: "1 - Vault: création structure org"
 
-# Déclenché par un changement sous terraform/clusters/. Détecte si un NOUVEAU
+# Déclenché par TOUT commit poussé sur main, quel que soit le fichier modifié
+# (pas de filtre "paths") — plus simple et sans angle mort : au pire le diff
+# ne touche pas terraform/clusters/, detect-org-change.sh renvoie action=none
+# et le run se termine en succès sans rien faire. Détecte si un NOUVEAU
 # dossier d'org a été ajouté, prépare la structure Vault correspondante, puis
 # s'arrête — la suite (apply infra) se poursuit manuellement via le workflow
 # "2 - Proxmox: apply/destroy cluster" (workflow_dispatch).
@@ -10,9 +13,9 @@ name: "1 - Vault: création structure org"
 # la suppression et le déclenchement de la pipeline) — elle se pilote
 # directement via workflow_dispatch sur "2 - Proxmox...", qui retire lui-même
 # le dossier une fois le destroy infra confirmé réussi. Ce commit automatique
-# de suppression redéclenchera ce workflow-ci (même trigger paths) : le job
-# "detect" renverra alors action=none, et rien ne s'exécutera — comportement
-# normal, pas une erreur.
+# de suppression redéclenchera aussi ce workflow-ci (trigger sur tout push) :
+# le job "detect" renverra alors action=none, et rien ne s'exécutera —
+# comportement normal, pas une erreur.
 #
 # Pourquoi en 2 workflows séparés plutôt qu'un seul avec des gates : les
 # GitHub Environments avec required reviewers (le mécanisme natif de pause)
@@ -21,8 +24,6 @@ name: "1 - Vault: création structure org"
 on:
   push:
     branches: [main]
-    paths:
-      - "terraform/clusters/**"
 
 env:
   VAULT_ADDR: ${{ vars.VAULT_ADDR }}
