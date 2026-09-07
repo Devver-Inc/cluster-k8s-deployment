@@ -210,8 +210,8 @@ workers additionnels — convention RKE2 type `lablabs.rke2`).
 ## Pipeline CI
 
 Les 3 étapes ci-dessus sont automatisées par deux workflows,
-[`detect-and-prepare.yml`](../.github/workflows/detect-and-prepare.yml) (auto)
-et [`continue-deploy.yml`](../.github/workflows/continue-deploy.yml) (manuel) :
+[`vault-create-org.yml`](../.github/workflows/vault-create-org.yml) (auto)
+et [`proxmox-deploy-cluster.yml`](../.github/workflows/proxmox-deploy-cluster.yml) (manuel) :
 un push ajoutant/supprimant un dossier `clusters/<org>/` déclenche la
 détection et la structure Vault, puis un second déclenchement manuel termine
 l'apply/destroy infra (découpage en deux dû à l'absence des Environments

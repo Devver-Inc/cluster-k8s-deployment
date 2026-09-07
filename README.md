@@ -48,7 +48,7 @@ avant toute action sensible (saisie de secrets, destruction d'infrastructure).
 
 ```
 .
-├── .github/workflows/       # pipeline CI (detect-and-prepare.yml + continue-deploy.yml)
+├── .github/workflows/       # pipeline CI (vault-create-org.yml + proxmox-deploy-cluster.yml)
 ├── terraform/
 │   ├── README.md            # documentation technique détaillée (le "pourquoi")
 │   ├── DEPLOY.md            # procédure pas-à-pas, manuelle ET pipeline (le "comment")

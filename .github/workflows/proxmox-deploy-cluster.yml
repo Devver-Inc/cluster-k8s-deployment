@@ -1,10 +1,10 @@
-name: Continue deploy
+name: "2 - Proxmox: apply/destroy cluster"
 
-# Déclenché manuellement, après "Detect and prepare" (voir ce workflow pour
+# Déclenché manuellement, après "1 - Vault: création structure org" (voir ce workflow pour
 # le contexte) — fait office de gate de validation humaine, puisque les
 # GitHub Environments avec required reviewers ne sont pas disponibles en
-# plan Free. L'admin relit le résumé du run "Detect and prepare" (org, action)
-# et les retape ici volontairement, avant de lancer la suite.
+# plan Free. L'admin relit le résumé du run "1 - Vault: création structure org"
+# (org, action) et les retape ici volontairement, avant de lancer la suite.
 on:
   workflow_dispatch:
     inputs:

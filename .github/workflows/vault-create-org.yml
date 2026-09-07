@@ -1,9 +1,10 @@
-name: Detect and prepare
+name: "1 - Vault: création structure org"
 
 # Déclenché uniquement par un changement sous terraform/clusters/ (ajout ou
 # suppression d'un dossier d'org). Détecte le cas, prépare la structure Vault
 # pour une création, puis s'arrête — la suite (apply/destroy infra) se
-# poursuit manuellement via le workflow "Continue deploy" (workflow_dispatch).
+# poursuit manuellement via le workflow "2 - Proxmox: apply/destroy cluster"
+# (workflow_dispatch).
 #
 # Pourquoi en 2 workflows séparés plutôt qu'un seul avec des gates : les
 # GitHub Environments avec required reviewers (le mécanisme natif de pause)
@@ -88,12 +89,12 @@ jobs:
               echo "Structure Vault créée pour \`${ORG}\`. Avant de continuer :"
               echo ""
               echo "1. Saisir les vrais secrets dans Vault (\`vm_password\`, \`ssh_private_key\`, ...) sur \`devver-infra-deployment/${ORG}\`."
-              echo "2. Aller dans **Actions > Continue deploy > Run workflow**."
+              echo "2. Aller dans **Actions > 2 - Proxmox: apply/destroy cluster > Run workflow**."
               echo "3. Renseigner : \`org=${ORG}\` et \`action=create\`."
             else
               echo "Suppression de \`${ORG}\` détectée. Pour continuer (destruction irréversible de l'infra) :"
               echo ""
-              echo "1. Aller dans **Actions > Continue deploy > Run workflow**."
+              echo "1. Aller dans **Actions > 2 - Proxmox: apply/destroy cluster > Run workflow**."
               echo "2. Renseigner : \`org=${ORG}\` et \`action=delete\`."
             fi
           } >> "$GITHUB_STEP_SUMMARY"

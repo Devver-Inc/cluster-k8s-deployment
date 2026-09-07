@@ -130,14 +130,16 @@ de pause/validation manuelle native (Environments + required reviewers) sur
 un repo privé en plan Free** — un second déclenchement manuel joue ce rôle à
 la place, gratuitement sur tout plan :
 
-1. [`detect-and-prepare.yml`](../.github/workflows/detect-and-prepare.yml) —
+1. [`vault-create-org.yml`](../.github/workflows/vault-create-org.yml)
+   (« **1 - Vault: création structure org** » dans l'onglet Actions) —
    automatique, déclenché par un push touchant `terraform/clusters/` sur
    `main`. Détecte l'org concernée et si c'est une création ou une
    suppression, crée la structure Vault pour une nouvelle org, puis **s'arrête**
    et affiche la suite à donner dans le résumé du run (onglet Summary de la
    page du run GitHub Actions).
-2. [`continue-deploy.yml`](../.github/workflows/continue-deploy.yml) —
-   déclenché manuellement (**Actions > Continue deploy > Run workflow**),
+2. [`proxmox-deploy-cluster.yml`](../.github/workflows/proxmox-deploy-cluster.yml)
+   (« **2 - Proxmox: apply/destroy cluster** » dans l'onglet Actions) —
+   déclenché manuellement (**Actions > 2 - Proxmox: apply/destroy cluster > Run workflow**),
    avec deux champs à renseigner (`org`, `action`) copiés depuis le résumé du
    run précédent. Termine le déploiement (création des VMs) ou la suppression
    (destroy des VMs puis nettoyage Vault).
@@ -187,16 +189,17 @@ vault write -f auth/terraform-orgs/role/terraform-ci/secret-id
 ### Ce que fait chaque workflow selon le cas
 
 **Ajout d'un dossier `clusters/<org>/`** :
-`detect-and-prepare.yml` détecte l'ajout, exécute `vault-sync` (structure
+`vault-create-org.yml` détecte l'ajout, exécute `vault-sync` (structure
 Vault créée automatiquement pour la nouvelle org), puis affiche dans son
-résumé : *« saisir les secrets, puis lancer Continue deploy avec org=... action=create »*.
-Une fois les vrais secrets saisis dans Vault (Étape 2 ci-dessus), lancer
-manuellement `continue-deploy.yml` avec `action=create` → job
-`apply-infra-create` (VMs créées).
+résumé : *« saisir les secrets, puis lancer 2 - Proxmox: apply/destroy cluster
+avec org=... action=create »*. Une fois les vrais secrets saisis dans Vault
+(Étape 2 ci-dessus), lancer manuellement `proxmox-deploy-cluster.yml` avec
+`action=create` → job `apply-infra-create` (VMs créées).
 
 **Suppression d'un dossier `clusters/<org>/`** :
-`detect-and-prepare.yml` détecte la suppression (ne touche à rien côté
-Vault), affiche dans son résumé : *« lancer Continue deploy avec org=... action=delete »*.
-Lancer manuellement `continue-deploy.yml` avec `action=delete` → job
-`destroy-infra` (VMs détruites, checkout du commit précédent au dossier
-supprimé) puis `vault-cleanup` (structure Vault de l'org supprimée).
+`vault-create-org.yml` détecte la suppression (ne touche à rien côté Vault),
+affiche dans son résumé : *« lancer 2 - Proxmox: apply/destroy cluster avec
+org=... action=delete »*. Lancer manuellement `proxmox-deploy-cluster.yml`
+avec `action=delete` → job `destroy-infra` (VMs détruites, checkout du commit
+précédent au dossier supprimé) puis `vault-cleanup` (structure Vault de l'org
+supprimée).
