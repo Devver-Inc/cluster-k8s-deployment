@@ -43,6 +43,8 @@ jobs:
           path: terraform-orgs
           roleId: ${{ secrets.VAULT_CI_ROLE_ID }}
           secretId: ${{ secrets.VAULT_CI_SECRET_ID }}
+          exportToken: true # sans ça, VAULT_TOKEN n'est jamais exporté et le
+          # provider Vault de Terraform échoue en plein plan/apply/destroy.
           secrets: |
             devver-infra-deployment/data/s3-backend key_id | AWS_ACCESS_KEY_ID ;
             devver-infra-deployment/data/s3-backend application_key | AWS_SECRET_ACCESS_KEY
@@ -86,6 +88,8 @@ jobs:
           path: terraform-orgs
           roleId: ${{ secrets.VAULT_CI_ROLE_ID }}
           secretId: ${{ secrets.VAULT_CI_SECRET_ID }}
+          exportToken: true # sans ça, VAULT_TOKEN n'est jamais exporté et le
+          # provider Vault de Terraform échoue en plein plan/apply/destroy.
           secrets: |
             devver-infra-deployment/data/s3-backend key_id | AWS_ACCESS_KEY_ID ;
             devver-infra-deployment/data/s3-backend application_key | AWS_SECRET_ACCESS_KEY
@@ -132,6 +136,8 @@ jobs:
           path: terraform-orgs
           roleId: ${{ secrets.VAULT_CI_ROLE_ID }}
           secretId: ${{ secrets.VAULT_CI_SECRET_ID }}
+          exportToken: true # sans ça, VAULT_TOKEN n'est jamais exporté et le
+          # provider Vault de Terraform échoue en plein plan/apply/destroy.
           secrets: |
             devver-infra-deployment/data/s3-backend key_id | AWS_ACCESS_KEY_ID ;
             devver-infra-deployment/data/s3-backend application_key | AWS_SECRET_ACCESS_KEY

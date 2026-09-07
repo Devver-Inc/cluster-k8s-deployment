@@ -72,6 +72,9 @@ jobs:
           path: terraform-orgs
           roleId: ${{ secrets.VAULT_CI_ROLE_ID }}
           secretId: ${{ secrets.VAULT_CI_SECRET_ID }}
+          exportToken: true # sans ça, VAULT_TOKEN n'est jamais exporté et le
+          # provider Vault de Terraform (terraform/vault/providers.tf, qui lit
+          # VAULT_TOKEN depuis l'env sans auth_login) échoue en plein apply.
           secrets: |
             devver-infra-deployment/data/s3-backend key_id | AWS_ACCESS_KEY_ID ;
             devver-infra-deployment/data/s3-backend application_key | AWS_SECRET_ACCESS_KEY
