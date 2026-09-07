@@ -1,40 +1,49 @@
 name: "1 - Vault: création structure org"
 
-# Déclenché par TOUT commit poussé sur main, quel que soit le fichier modifié
-# (pas de filtre "paths") — plus simple et sans angle mort : au pire aucune
-# org n'a besoin d'être créée, detect-org-change.sh renvoie action=none et le
-# run se termine en succès sans rien faire. Détecte si une org du repo n'a
-# pas encore de structure Vault, la prépare, puis s'arrête — la suite (apply
-# infra) se poursuit manuellement via le workflow "2 - Proxmox: apply/destroy
-# cluster" (workflow_dispatch).
+# Deux déclencheurs, deux rôles bien distincts :
 #
-# detect-org-change.sh compare l'état du repo (dossiers clusters/<org>/) à
-# l'état réel de Vault (policies terraform-<org>-ro déjà créées), plutôt qu'un
-# diff entre deux commits git — ce dernier mécanisme s'est révélé peu fiable
-# en pratique (une org ajoutée puis "perdue" si d'autres commits/push
-# s'enchaînent avant qu'un run réussisse). La comparaison d'état donne
-# toujours le bon résultat, peu importe l'historique.
+# - push sur main : job "detect" INFORMATIF SEULEMENT. Compare l'état du repo
+#   (dossiers clusters/<org>/) à l'état réel de Vault (policies
+#   terraform-<org>-ro déjà créées) via detect-org-change.sh, et affiche dans
+#   le résumé du run si une org du repo n'a pas encore de structure Vault.
+#   Ne crée JAMAIS rien automatiquement — voir plus bas pourquoi.
+# - workflow_dispatch (org en input) : job "vault-create", qui crée
+#   réellement la structure Vault de l'org donnée.
 #
-# Ne gère QUE les créations : la suppression d'un cluster ne passe pas par ce
-# workflow — elle se pilote directement via workflow_dispatch sur
-# "2 - Proxmox...", qui retire lui-même le dossier une fois le destroy infra
-# confirmé réussi. Ce commit automatique de suppression redéclenchera aussi ce
-# workflow-ci (trigger sur tout push) : le job "detect" renverra alors
-# action=none, et rien ne s'exécutera — comportement normal, pas une erreur.
+# Pourquoi la création n'est plus automatique sur push (elle l'a été) :
+# un apply qui recalcule toute la liste `orgs` depuis un scan du repo
+# checkouté est dangereux si ce checkout est incomplet ou désynchronisé —
+# toute org absente du scan mais déjà présente dans Vault se retrouve retirée
+# du for_each, donc DÉTRUITE par le même apply. Ça a réellement failli arriver
+# (structure de "prod" proposée à la destruction alors qu'elle existait
+# toujours, simplement absente d'un checkout partiel). Le job "vault-create"
+# ci-dessous élimine ce risque structurellement : il lit l'état RÉEL de Vault
+# (list-vault-orgs.sh), y AJOUTE seulement l'org ciblée, et applique cette
+# liste reconstruite — aucune org déjà connue de Vault ne peut jamais en
+# disparaître via ce chemin.
 #
-# Pourquoi en 2 workflows séparés plutôt qu'un seul avec des gates : les
-# GitHub Environments avec required reviewers (le mécanisme natif de pause)
-# ne sont pas disponibles sur un repo privé en plan Free. Un second
-# déclenchement manuel joue ce rôle à la place, gratuitement sur tout plan.
+# Pourquoi en 2 workflows séparés (celui-ci + "2 - Proxmox...") plutôt qu'un
+# seul avec des gates : les GitHub Environments avec required reviewers (le
+# mécanisme natif de pause) ne sont pas disponibles sur un repo privé en plan
+# Free. Un déclenchement manuel explicite joue ce rôle à la place, gratuitement.
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      org:
+        description: "Organisation pour laquelle créer la structure Vault (nom du dossier clusters/<org>/)"
+        required: true
+        type: string
 
 env:
   VAULT_ADDR: ${{ vars.VAULT_ADDR }}
 
 jobs:
+  # --- Détection (push uniquement) — informatif, ne crée rien -------------
+
   detect:
+    if: github.event_name == 'push'
     runs-on: self-hosted
     outputs:
       org: ${{ steps.detect.outputs.org }}
@@ -57,9 +66,30 @@ jobs:
       - id: detect
         run: bash terraform/scripts/detect-org-change.sh
 
-  vault-sync:
+  summary:
     needs: detect
     if: needs.detect.outputs.action == 'create'
+    runs-on: self-hosted
+    steps:
+      - name: Write summary
+        env:
+          ORG: ${{ needs.detect.outputs.org }}
+        run: |
+          {
+            echo "## Action requise"
+            echo ""
+            echo "L'org \`${ORG}\` existe dans le repo mais n'a pas encore de structure Vault."
+            echo ""
+            echo "1. Aller dans **Actions > 1 - Vault: création structure org > Run workflow**."
+            echo "2. Renseigner : \`org=${ORG}\`."
+            echo "3. Une fois créée, saisir les vrais secrets dans Vault (\`vm_password\`, \`ssh_private_key\`, ...) sur \`devver-infra-deployment/${ORG}\`."
+            echo "4. Aller dans **Actions > 2 - Proxmox: apply/destroy cluster > Run workflow**, renseigner \`org=${ORG}\` et \`action=create\`."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # --- Création (workflow_dispatch uniquement) ----------------------------
+
+  vault-create:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -72,40 +102,36 @@ jobs:
           path: terraform-orgs
           roleId: ${{ secrets.VAULT_CI_ROLE_ID }}
           secretId: ${{ secrets.VAULT_CI_SECRET_ID }}
-          exportToken: true # sans ça, VAULT_TOKEN n'est jamais exporté et le
-          # provider Vault de Terraform (terraform/vault/providers.tf, qui lit
-          # VAULT_TOKEN depuis l'env sans auth_login) échoue en plein apply.
+          exportToken: true
           secrets: |
             devver-infra-deployment/data/s3-backend key_id | AWS_ACCESS_KEY_ID ;
             devver-infra-deployment/data/s3-backend application_key | AWS_SECRET_ACCESS_KEY
 
-      - name: List orgs
+      # État RÉEL de Vault (pas un scan du repo) + ajout de l'org ciblée
+      # uniquement — jamais un recalcul complet depuis le repo checkouté.
+      - name: Compute orgs (existing + target)
         id: orgs
-        run: echo "orgs=$(bash terraform/scripts/list-orgs.sh)" >> "$GITHUB_OUTPUT"
+        run: |
+          current=$(bash terraform/scripts/list-vault-orgs.sh)
+          new_list=$(printf '%s\n%s\n' "${current}" "${{ inputs.org }}" | grep -v '^$' | sort -u | jq -R . | jq -s -c .)
+          echo "orgs=${new_list}" >> "$GITHUB_OUTPUT"
 
       - name: Terraform init
         working-directory: terraform/vault
         run: terraform init -backend-config=backend.hcl -input=false
 
-      - name: Terraform apply (create org structure)
+      - name: Terraform apply (add target org, never remove existing ones)
         working-directory: terraform/vault
         run: terraform apply -auto-approve -input=false -var='orgs=${{ steps.orgs.outputs.orgs }}'
 
-  summary:
-    needs: [detect, vault-sync]
-    if: needs.detect.outputs.action == 'create'
-    runs-on: self-hosted
-    steps:
       - name: Write summary
-        env:
-          ORG: ${{ needs.detect.outputs.org }}
         run: |
           {
-            echo "## Suite à donner"
+            echo "## Structure Vault créée"
             echo ""
-            echo "Structure Vault créée pour \`${ORG}\`. Avant de continuer :"
+            echo "Structure Vault créée pour \`${{ inputs.org }}\`. Avant de continuer :"
             echo ""
-            echo "1. Saisir les vrais secrets dans Vault (\`vm_password\`, \`ssh_private_key\`, ...) sur \`devver-infra-deployment/${ORG}\`."
+            echo "1. Saisir les vrais secrets dans Vault (\`vm_password\`, \`ssh_private_key\`, ...) sur \`devver-infra-deployment/${{ inputs.org }}\`."
             echo "2. Aller dans **Actions > 2 - Proxmox: apply/destroy cluster > Run workflow**."
-            echo "3. Renseigner : \`org=${ORG}\` et \`action=create\`."
+            echo "3. Renseigner : \`org=${{ inputs.org }}\` et \`action=create\`."
           } >> "$GITHUB_STEP_SUMMARY"

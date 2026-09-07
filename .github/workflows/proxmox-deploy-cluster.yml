@@ -124,8 +124,6 @@ jobs:
     if: inputs.action == 'delete'
     runs-on: self-hosted
     steps:
-      # Re-checkout du commit courant (dossier déjà supprimé) : list-orgs.sh
-      # doit scanner l'état actuel pour ne plus voir l'org supprimée.
       - uses: actions/checkout@v4
 
       - name: Vault auth + fetch B2 credentials
@@ -142,9 +140,16 @@ jobs:
             devver-infra-deployment/data/s3-backend key_id | AWS_ACCESS_KEY_ID ;
             devver-infra-deployment/data/s3-backend application_key | AWS_SECRET_ACCESS_KEY
 
-      - name: List orgs
+      # État RÉEL de Vault (pas un scan du repo, cf. terraform/README.md) —
+      # ne retire QUE l'org explicitement ciblée par ce run (inputs.org, dont
+      # l'infra vient d'être détruite juste avant). Toute autre org présente
+      # dans Vault reste dans la liste appliquée, donc jamais affectée, même
+      # si le checkout du repo est incomplet ou désynchronisé.
+      - name: Compute orgs (existing minus target)
         id: orgs
-        run: echo "orgs=$(bash terraform/scripts/list-orgs.sh)" >> "$GITHUB_OUTPUT"
+        run: |
+          remaining=$(bash terraform/scripts/list-vault-orgs.sh | grep -v "^${{ inputs.org }}$" || true)
+          echo "orgs=$(printf '%s\n' "${remaining}" | jq -R . | jq -s -c 'map(select(length > 0))')" >> "$GITHUB_OUTPUT"
 
       - name: Terraform init
         working-directory: terraform/vault

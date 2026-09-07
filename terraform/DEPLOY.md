@@ -52,13 +52,23 @@ vault kv put devver-infra-deployment/vm_secret_template \
 ```bash
 cd terraform/vault
 source ../login.sh          # relit VAULT_ADDR + AWS_* depuis Vault désormais
-terraform init  -backend-config=backend.hcl
-terraform apply -var='orgs=["prod"]'   # (nouvelle org) ajouter son nom à la liste
+terraform init -backend-config=backend.hcl
+
+# Toujours partir de l'état RÉEL de Vault (pas d'une liste tapée à la main) et
+# n'y AJOUTER que la nouvelle org — jamais un remplacement complet. Une liste
+# tapée en dur (ex: -var='orgs=["prod"]') RETIRE du for_each toute org absente
+# de cette liste, donc la SUPPRIME au prochain apply si elle existe déjà dans
+# Vault. C'est arrivé en pratique (structure de prod proposée à la destruction
+# par erreur) — toujours passer par cette commande, jamais une liste en dur :
+current=$(bash ../scripts/list-vault-orgs.sh)
+new_orgs=$(printf '%s\n%s\n' "${current}" "test" | grep -v '^$' | sort -u | jq -R . | jq -s -c .)
+terraform apply -var="orgs=${new_orgs}"
 ```
 
-Crée : le mount KV `devver-infra-deployment`, la policy + role AppRole par org,
-et clone `vm_secret_template` → `devver-infra-deployment/prod` (une seule fois,
-jamais réécrit ensuite).
+Crée : le mount KV `devver-infra-deployment`, la policy + role AppRole pour la
+nouvelle org, et clone `vm_secret_template` → `devver-infra-deployment/<org>`
+(une seule fois, jamais réécrit ensuite) — sans jamais toucher aux orgs déjà
+existantes.
 
 Écrire les credentials Proxmox si pas déjà fait (secret partagé, une fois) :
 
@@ -134,12 +144,19 @@ un repo privé en plan Free** — un second déclenchement manuel joue ce rôle 
 la place, gratuitement sur tout plan :
 
 1. [`vault-create-org.yml`](../.github/workflows/vault-create-org.yml)
-   (« **1 - Vault: création structure org** » dans l'onglet Actions) —
-   automatique, déclenché par un push touchant `terraform/clusters/` sur
-   `main`. Détecte si un **nouveau** dossier d'org a été ajouté (uniquement
-   les créations, voir plus bas pour les suppressions), crée la structure
-   Vault correspondante, puis **s'arrête** et affiche la suite à donner dans
-   le résumé du run (onglet Summary de la page du run GitHub Actions).
+   (« **1 - Vault: création structure org** » dans l'onglet Actions) — deux
+   triggers distincts :
+   - Sur push touchant `terraform/clusters/` : job `detect` **informatif
+     uniquement** — signale dans le résumé du run si une org du repo n'a pas
+     encore de structure Vault, mais ne crée jamais rien automatiquement (un
+     apply automatique qui recalculerait la liste `orgs` depuis un checkout
+     potentiellement incomplet risquerait de **supprimer** une org existante
+     absente de ce checkout — ça a réellement failli arriver).
+   - `workflow_dispatch` (**Actions > 1 - Vault: création structure org >
+     Run workflow**, input `org`) : crée réellement la structure Vault de
+     l'org donnée, en lisant l'état **réel** de Vault et en y **ajoutant**
+     uniquement cette org — les autres orgs déjà présentes ne sont jamais
+     touchées, quel que soit l'état du repo checkouté.
 2. [`proxmox-deploy-cluster.yml`](../.github/workflows/proxmox-deploy-cluster.yml)
    (« **2 - Proxmox: apply/destroy cluster** » dans l'onglet Actions) —
    déclenché **toujours manuellement** (**Actions > 2 - Proxmox: apply/destroy
@@ -222,12 +239,13 @@ vault write -f auth/terraform-orgs/role/terraform-ci/secret-id
 ### Ce que fait chaque workflow selon le cas
 
 **Ajout d'un dossier `clusters/<org>/`** :
-`vault-create-org.yml` détecte l'ajout, exécute `vault-sync` (structure
-Vault créée automatiquement pour la nouvelle org), puis affiche dans son
-résumé : *« saisir les secrets, puis lancer 2 - Proxmox: apply/destroy cluster
-avec org=... action=create »*. Une fois les vrais secrets saisis dans Vault
-(Étape 2 ci-dessus), lancer manuellement `proxmox-deploy-cluster.yml` avec
-`action=create` → job `apply-infra-create` (VMs créées).
+Le push déclenche `vault-create-org.yml` en mode `detect` — il ne fait que
+signaler dans son résumé que `<org>` n'a pas encore de structure Vault.
+Lancer ensuite **manuellement** ce même workflow en `workflow_dispatch` avec
+`org=<org>` → job `vault-create` (structure Vault créée pour cette org
+uniquement, sans toucher aux autres). Une fois les vrais secrets saisis dans
+Vault (Étape 2 ci-dessus), lancer manuellement `proxmox-deploy-cluster.yml`
+avec `action=create` → job `apply-infra-create` (VMs créées).
 
 **Supprimer un cluster** — ne jamais supprimer `clusters/<org>/` soi-même :
 

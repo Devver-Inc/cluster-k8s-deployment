@@ -165,6 +165,14 @@ resource "vault_policy" "ci" {
       capabilities = ["create", "read", "update", "delete", "sudo"]
     }
 
+    # Chemin distinct de sys/auth/terraform-orgs ci-dessus — interrogé par le
+    # provider Vault Terraform (GET) pour lire les métadonnées du mount de
+    # l'auth backend (vault_auth_backend). Sans ce path, l'apply échoue en
+    # plein milieu avec un 403 sur cette seule resource.
+    path "sys/mounts/auth/terraform-orgs" {
+      capabilities = ["read"]
+    }
+
     path "auth/terraform-orgs/role/*" {
       capabilities = ["create", "read", "update", "delete", "list"]
     }
