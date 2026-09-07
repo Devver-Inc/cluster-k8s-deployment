@@ -54,6 +54,7 @@ jobs:
         with:
           url: ${{ vars.VAULT_ADDR }}
           method: approle
+          path: terraform-orgs
           roleId: ${{ secrets.VAULT_CI_ROLE_ID }}
           secretId: ${{ secrets.VAULT_CI_SECRET_ID }}
           secrets: |
