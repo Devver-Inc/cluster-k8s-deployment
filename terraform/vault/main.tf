@@ -152,6 +152,15 @@ resource "vault_policy" "ci" {
       capabilities = ["create", "read", "update", "delete", "list"]
     }
 
+    # "list" sur le path exact (sans wildcard) est nécessaire pour l'opération
+    # de liste globale elle-même (vault list sys/policies/acl) — le wildcard
+    # ci-dessus ne couvre que la lecture des policies individuelles. Utilisé
+    # par terraform/scripts/list-vault-orgs.sh pour déduire les orgs déjà
+    # connues de Vault (comparaison état repo vs état Vault, cf. detect-org-change.sh).
+    path "sys/policies/acl" {
+      capabilities = ["list"]
+    }
+
     path "sys/auth/terraform-orgs" {
       capabilities = ["create", "read", "update", "delete", "sudo"]
     }

@@ -157,14 +157,19 @@ nécessaire pour l'instant, ce découpage en deux fonctionne aussi bien.
 À installer une fois sur la machine qui héberge le runner (pas géré par les
 workflows eux-mêmes) :
 - **`terraform`** — exécute les `plan`/`apply`/`destroy`.
-- **`git`** — utilisé par `terraform/scripts/detect-org-change.sh` pour
-  comparer les commits et détecter l'ajout/suppression d'un dossier d'org.
-- **`jq`** — utilisé par `terraform/scripts/list-orgs.sh` pour générer la
-  liste des orgs au format JSON attendu par `-var='orgs=...'`.
-
-L'authentification à Vault passe entièrement par l'action `hashicorp/vault-action`
-dans les workflows — le CLI `vault` n'est pas nécessaire sur le runner pour la CI
-(contrairement à l'usage manuel local documenté plus haut, où `login.sh` en a besoin).
+- **`jq`** — utilisé par `terraform/scripts/list-orgs.sh` et
+  `terraform/scripts/list-vault-orgs.sh` pour parser/générer du JSON.
+- **`vault`** (CLI) — utilisé par `terraform/scripts/list-vault-orgs.sh` pour
+  lire l'état réel de Vault (`vault list sys/policies/acl`) et déterminer
+  quelles orgs ont déjà une structure Vault. `detect-org-change.sh` compare
+  cet état à celui du repo plutôt que de déduire un diff git — ce dernier
+  mécanisme s'est révélé peu fiable en pratique (une création pouvait être
+  "perdue" si plusieurs commits/push s'enchaînaient avant qu'un run réussisse).
+  Le CLI utilise `VAULT_ADDR`/`VAULT_TOKEN` déjà exportés par
+  `hashicorp/vault-action` (`exportToken: true`), pas de config supplémentaire
+  à faire sur le runner au-delà de l'installation.
+- **`git`** — utilisé par le step `Remove cluster folder and push` (suppression
+  d'un cluster, voir plus bas) pour committer et pousser sur `main`.
 
 > **Isolation** : les jobs `runs-on: self-hosted` s'exécutent **directement sur
 > la machine du runner**, pas dans un conteneur éphémère — contrairement aux

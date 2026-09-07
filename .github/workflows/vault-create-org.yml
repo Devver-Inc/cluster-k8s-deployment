@@ -1,21 +1,26 @@
 name: "1 - Vault: création structure org"
 
 # Déclenché par TOUT commit poussé sur main, quel que soit le fichier modifié
-# (pas de filtre "paths") — plus simple et sans angle mort : au pire le diff
-# ne touche pas terraform/clusters/, detect-org-change.sh renvoie action=none
-# et le run se termine en succès sans rien faire. Détecte si un NOUVEAU
-# dossier d'org a été ajouté, prépare la structure Vault correspondante, puis
-# s'arrête — la suite (apply infra) se poursuit manuellement via le workflow
-# "2 - Proxmox: apply/destroy cluster" (workflow_dispatch).
+# (pas de filtre "paths") — plus simple et sans angle mort : au pire aucune
+# org n'a besoin d'être créée, detect-org-change.sh renvoie action=none et le
+# run se termine en succès sans rien faire. Détecte si une org du repo n'a
+# pas encore de structure Vault, la prépare, puis s'arrête — la suite (apply
+# infra) se poursuit manuellement via le workflow "2 - Proxmox: apply/destroy
+# cluster" (workflow_dispatch).
 #
-# Ne gère QUE les créations : la suppression d'un cluster ne passe plus par un
-# diff de dossier (trop fragile face à un historique git qui s'éloigne entre
-# la suppression et le déclenchement de la pipeline) — elle se pilote
-# directement via workflow_dispatch sur "2 - Proxmox...", qui retire lui-même
-# le dossier une fois le destroy infra confirmé réussi. Ce commit automatique
-# de suppression redéclenchera aussi ce workflow-ci (trigger sur tout push) :
-# le job "detect" renverra alors action=none, et rien ne s'exécutera —
-# comportement normal, pas une erreur.
+# detect-org-change.sh compare l'état du repo (dossiers clusters/<org>/) à
+# l'état réel de Vault (policies terraform-<org>-ro déjà créées), plutôt qu'un
+# diff entre deux commits git — ce dernier mécanisme s'est révélé peu fiable
+# en pratique (une org ajoutée puis "perdue" si d'autres commits/push
+# s'enchaînent avant qu'un run réussisse). La comparaison d'état donne
+# toujours le bon résultat, peu importe l'historique.
+#
+# Ne gère QUE les créations : la suppression d'un cluster ne passe pas par ce
+# workflow — elle se pilote directement via workflow_dispatch sur
+# "2 - Proxmox...", qui retire lui-même le dossier une fois le destroy infra
+# confirmé réussi. Ce commit automatique de suppression redéclenchera aussi ce
+# workflow-ci (trigger sur tout push) : le job "detect" renverra alors
+# action=none, et rien ne s'exécutera — comportement normal, pas une erreur.
 #
 # Pourquoi en 2 workflows séparés plutôt qu'un seul avec des gates : les
 # GitHub Environments avec required reviewers (le mécanisme natif de pause)
@@ -36,12 +41,21 @@ jobs:
       action: ${{ steps.detect.outputs.action }}
     steps:
       - uses: actions/checkout@v4
+
+      # Nécessaire pour lire l'état réel de Vault (list-vault-orgs.sh) — le
+      # CLI vault utilise VAULT_ADDR/VAULT_TOKEN exportés par exportToken.
+      - name: Vault auth
+        uses: hashicorp/vault-action@v3
         with:
-          fetch-depth: 0 # historique complet nécessaire pour diff before/after
+          url: ${{ vars.VAULT_ADDR }}
+          method: approle
+          path: terraform-orgs
+          roleId: ${{ secrets.VAULT_CI_ROLE_ID }}
+          secretId: ${{ secrets.VAULT_CI_SECRET_ID }}
+          exportToken: true
+
       - id: detect
-        run: |
-          bash terraform/scripts/detect-org-change.sh \
-            "${{ github.event.before }}" "${{ github.sha }}"
+        run: bash terraform/scripts/detect-org-change.sh
 
   vault-sync:
     needs: detect
