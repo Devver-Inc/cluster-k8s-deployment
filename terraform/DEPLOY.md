@@ -148,6 +148,30 @@ Si l'org passe un jour sur un plan GitHub payant (Team/Enterprise), il devient
 possible de revenir à un unique workflow avec de vrais Environments — pas
 nécessaire pour l'instant, ce découpage en deux fonctionne aussi bien.
 
+### Prérequis logiciels sur le runner self-hosted
+
+À installer une fois sur la machine qui héberge le runner (pas géré par les
+workflows eux-mêmes) :
+- **`terraform`** — exécute les `plan`/`apply`/`destroy`.
+- **`git`** — utilisé par `terraform/scripts/detect-org-change.sh` pour
+  comparer les commits et détecter l'ajout/suppression d'un dossier d'org.
+- **`jq`** — utilisé par `terraform/scripts/list-orgs.sh` pour générer la
+  liste des orgs au format JSON attendu par `-var='orgs=...'`.
+
+L'authentification à Vault passe entièrement par l'action `hashicorp/vault-action`
+dans les workflows — le CLI `vault` n'est pas nécessaire sur le runner pour la CI
+(contrairement à l'usage manuel local documenté plus haut, où `login.sh` en a besoin).
+
+> **Isolation** : les jobs `runs-on: self-hosted` s'exécutent **directement sur
+> la machine du runner**, pas dans un conteneur éphémère — contrairement aux
+> runners hébergés par GitHub. Il n'y a donc pas d'isolation filesystem/process
+> stricte entre jobs ou entre runs, et pas de nettoyage garanti au-delà du
+> dossier de travail du repo (les credentials injectés en variables d'env ne
+> survivent pas au job qui les exporte, mais rien d'autre n'est assaini
+> automatiquement). Accepté comme tel pour ce projet (repo privé, équipe
+> restreinte de confiance) — à revisiter avec un conteneur Docker éphémère par
+> job (`container:` dans le YAML) si le contexte de confiance change.
+
 ### Prérequis one-shot (à faire manuellement avant le premier run)
 
 Un AppRole `terraform-ci` dédié à la pipeline, distinct des roles
