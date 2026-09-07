@@ -1,0 +1,147 @@
+name: Continue deploy
+
+# Déclenché manuellement, après "Detect and prepare" (voir ce workflow pour
+# le contexte) — fait office de gate de validation humaine, puisque les
+# GitHub Environments avec required reviewers ne sont pas disponibles en
+# plan Free. L'admin relit le résumé du run "Detect and prepare" (org, action)
+# et les retape ici volontairement, avant de lancer la suite.
+on:
+  workflow_dispatch:
+    inputs:
+      org:
+        description: "Organisation concernée (nom du dossier clusters/<org>/)"
+        required: true
+        type: string
+      action:
+        description: "Action à poursuivre"
+        required: true
+        type: choice
+        options: [create, delete]
+
+env:
+  VAULT_ADDR: ${{ vars.VAULT_ADDR }}
+
+jobs:
+  # --- Création ------------------------------------------------------------
+
+  apply-infra-create:
+    if: inputs.action == 'create'
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      # Un seul AppRole terraform-ci pour toutes les orgs (voir terraform/README.md) :
+      # GitHub Actions ne permet pas de référencer secrets.X avec un nom
+      # construit dynamiquement, donc un role par org obligerait à modifier ce
+      # workflow à chaque ajout/suppression d'org. Le chemin Vault interrogé
+      # s'adapte dynamiquement à l'org à la place (ligne "secrets:" ci-dessous).
+      - name: Vault auth + fetch B2 credentials
+        uses: hashicorp/vault-action@v3
+        with:
+          url: ${{ vars.VAULT_ADDR }}
+          method: approle
+          roleId: ${{ secrets.VAULT_CI_ROLE_ID }}
+          secretId: ${{ secrets.VAULT_CI_SECRET_ID }}
+          secrets: |
+            devver-infra-deployment/data/s3-backend key_id | AWS_ACCESS_KEY_ID ;
+            devver-infra-deployment/data/s3-backend application_key | AWS_SECRET_ACCESS_KEY
+
+      - name: Terraform init
+        working-directory: terraform/clusters/${{ inputs.org }}
+        run: terraform init -backend-config=backend.hcl -input=false
+
+      - name: Terraform plan
+        working-directory: terraform/clusters/${{ inputs.org }}
+        env:
+          TF_VAR_vault_role_id: ${{ secrets.VAULT_CI_ROLE_ID }}
+          TF_VAR_vault_secret_id: ${{ secrets.VAULT_CI_SECRET_ID }}
+        run: terraform plan -input=false
+
+      - name: Terraform apply
+        working-directory: terraform/clusters/${{ inputs.org }}
+        env:
+          TF_VAR_vault_role_id: ${{ secrets.VAULT_CI_ROLE_ID }}
+          TF_VAR_vault_secret_id: ${{ secrets.VAULT_CI_SECRET_ID }}
+        run: terraform apply -auto-approve -input=false
+
+  # --- Suppression -----------------------------------------------------------
+
+  destroy-infra:
+    if: inputs.action == 'delete'
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # historique complet nécessaire pour retrouver le commit supprimant le dossier
+
+      # github.event.before n'existe que pour l'event "push" — indisponible en
+      # workflow_dispatch. On retrouve donc le commit qui a supprimé le
+      # dossier clusters/<org>/, et on checkout son PARENT (où le dossier
+      # existe encore) pour pouvoir exécuter le destroy.
+      - name: Resolve commit before deletion
+        id: resolve
+        run: |
+          delete_commit=$(git log --diff-filter=D --format=%H -1 -- "terraform/clusters/${{ inputs.org }}/*")
+          if [[ -z "${delete_commit}" ]]; then
+            echo "::error::Aucun commit de suppression trouvé pour terraform/clusters/${{ inputs.org }}/ — l'org existe-t-elle encore dans l'historique ?" >&2
+            exit 1
+          fi
+          echo "ref=${delete_commit}^" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.resolve.outputs.ref }}
+
+      - name: Vault auth + fetch B2 credentials
+        uses: hashicorp/vault-action@v3
+        with:
+          url: ${{ vars.VAULT_ADDR }}
+          method: approle
+          roleId: ${{ secrets.VAULT_CI_ROLE_ID }}
+          secretId: ${{ secrets.VAULT_CI_SECRET_ID }}
+          secrets: |
+            devver-infra-deployment/data/s3-backend key_id | AWS_ACCESS_KEY_ID ;
+            devver-infra-deployment/data/s3-backend application_key | AWS_SECRET_ACCESS_KEY
+
+      - name: Terraform init
+        working-directory: terraform/clusters/${{ inputs.org }}
+        run: terraform init -backend-config=backend.hcl -input=false
+
+      - name: Terraform destroy
+        working-directory: terraform/clusters/${{ inputs.org }}
+        env:
+          TF_VAR_vault_role_id: ${{ secrets.VAULT_CI_ROLE_ID }}
+          TF_VAR_vault_secret_id: ${{ secrets.VAULT_CI_SECRET_ID }}
+        run: terraform destroy -auto-approve -input=false
+
+  vault-cleanup:
+    needs: destroy-infra
+    if: inputs.action == 'delete'
+    runs-on: self-hosted
+    steps:
+      # Re-checkout du commit courant (dossier déjà supprimé) : list-orgs.sh
+      # doit scanner l'état actuel pour ne plus voir l'org supprimée.
+      - uses: actions/checkout@v4
+
+      - name: Vault auth + fetch B2 credentials
+        uses: hashicorp/vault-action@v3
+        with:
+          url: ${{ vars.VAULT_ADDR }}
+          method: approle
+          roleId: ${{ secrets.VAULT_CI_ROLE_ID }}
+          secretId: ${{ secrets.VAULT_CI_SECRET_ID }}
+          secrets: |
+            devver-infra-deployment/data/s3-backend key_id | AWS_ACCESS_KEY_ID ;
+            devver-infra-deployment/data/s3-backend application_key | AWS_SECRET_ACCESS_KEY
+
+      - name: List orgs
+        id: orgs
+        run: echo "orgs=$(bash terraform/scripts/list-orgs.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: Terraform init
+        working-directory: terraform/vault
+        run: terraform init -backend-config=backend.hcl -input=false
+
+      - name: Terraform apply (remove org structure)
+        working-directory: terraform/vault
+        run: terraform apply -auto-approve -input=false -var='orgs=${{ steps.orgs.outputs.orgs }}'
