@@ -70,27 +70,12 @@ jobs:
     if: inputs.action == 'delete'
     runs-on: self-hosted
     steps:
+      # L'admin ne supprime jamais lui-même clusters/<org>/ — il déclenche ce
+      # workflow directement, dossier encore présent. Un simple checkout du
+      # commit courant suffit donc : plus besoin de retrouver un commit de
+      # suppression dans l'historique (fragile, cf. commentaire du step
+      # "Remove cluster folder and push" plus bas).
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # historique complet nécessaire pour retrouver le commit supprimant le dossier
-
-      # github.event.before n'existe que pour l'event "push" — indisponible en
-      # workflow_dispatch. On retrouve donc le commit qui a supprimé le
-      # dossier clusters/<org>/, et on checkout son PARENT (où le dossier
-      # existe encore) pour pouvoir exécuter le destroy.
-      - name: Resolve commit before deletion
-        id: resolve
-        run: |
-          delete_commit=$(git log --diff-filter=D --format=%H -1 -- "terraform/clusters/${{ inputs.org }}/*")
-          if [[ -z "${delete_commit}" ]]; then
-            echo "::error::Aucun commit de suppression trouvé pour terraform/clusters/${{ inputs.org }}/ — l'org existe-t-elle encore dans l'historique ?" >&2
-            exit 1
-          fi
-          echo "ref=${delete_commit}^" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.resolve.outputs.ref }}
 
       - name: Vault auth + fetch B2 credentials
         uses: hashicorp/vault-action@v3
@@ -113,6 +98,20 @@ jobs:
           TF_VAR_vault_role_id: ${{ secrets.VAULT_CI_ROLE_ID }}
           TF_VAR_vault_secret_id: ${{ secrets.VAULT_CI_SECRET_ID }}
         run: terraform destroy -auto-approve -input=false
+
+      # Le destroy a réussi : c'est maintenant la pipeline elle-même qui
+      # retire le dossier (pas l'admin) et pousse ce commit sur main — plus
+      # de dépendance à un diff de commits précis pour retrouver le code
+      # Terraform d'une org disparue. Ce commit redéclenchera
+      # "1 - Vault: création structure org" (même trigger paths), qui se
+      # terminera en action=none puisqu'aucune org n'y est ajoutée.
+      - name: Remove cluster folder and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git rm -r "terraform/clusters/${{ inputs.org }}"
+          git commit -m "chore: remove clusters/${{ inputs.org }} after destroy"
+          git push origin HEAD:main
 
   vault-cleanup:
     needs: destroy-infra

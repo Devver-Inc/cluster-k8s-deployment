@@ -5,9 +5,12 @@ vide. Pour une org suivante, sauter aux étapes marquées **(nouvelle org)**.
 
 Ce guide décrit la procédure **manuelle** (debug/test local). En usage normal,
 une fois la pipeline CI en place (voir [section dédiée](#via-la-pipeline-ci)
-en fin de fichier), il suffit de créer ou supprimer un dossier
-`terraform/clusters/<org>/` et de merger la PR — tout le reste s'enchaîne
-automatiquement.
+en fin de fichier) : pour **créer** un cluster, il suffit de créer un dossier
+`terraform/clusters/<org>/` et de merger la PR ; pour **supprimer** un cluster,
+ne jamais supprimer le dossier soi-même — lancer directement le workflow
+`2 - Proxmox: apply/destroy cluster` avec `action=delete`, c'est la pipeline
+qui retire le dossier une fois le destroy confirmé (voir la section dédiée
+pour le pourquoi).
 
 ## Prérequis
 
@@ -133,16 +136,17 @@ la place, gratuitement sur tout plan :
 1. [`vault-create-org.yml`](../.github/workflows/vault-create-org.yml)
    (« **1 - Vault: création structure org** » dans l'onglet Actions) —
    automatique, déclenché par un push touchant `terraform/clusters/` sur
-   `main`. Détecte l'org concernée et si c'est une création ou une
-   suppression, crée la structure Vault pour une nouvelle org, puis **s'arrête**
-   et affiche la suite à donner dans le résumé du run (onglet Summary de la
-   page du run GitHub Actions).
+   `main`. Détecte si un **nouveau** dossier d'org a été ajouté (uniquement
+   les créations, voir plus bas pour les suppressions), crée la structure
+   Vault correspondante, puis **s'arrête** et affiche la suite à donner dans
+   le résumé du run (onglet Summary de la page du run GitHub Actions).
 2. [`proxmox-deploy-cluster.yml`](../.github/workflows/proxmox-deploy-cluster.yml)
    (« **2 - Proxmox: apply/destroy cluster** » dans l'onglet Actions) —
-   déclenché manuellement (**Actions > 2 - Proxmox: apply/destroy cluster > Run workflow**),
-   avec deux champs à renseigner (`org`, `action`) copiés depuis le résumé du
-   run précédent. Termine le déploiement (création des VMs) ou la suppression
-   (destroy des VMs puis nettoyage Vault).
+   déclenché **toujours manuellement** (**Actions > 2 - Proxmox: apply/destroy
+   cluster > Run workflow**), avec deux champs à renseigner (`org`, `action`).
+   Pour une création, `org`/`action=create` sont copiés depuis le résumé du
+   run précédent. Pour une suppression, se déclenche directement (voir plus
+   bas — jamais précédé d'une suppression manuelle du dossier).
 
 Si l'org passe un jour sur un plan GitHub payant (Team/Enterprise), il devient
 possible de revenir à un unique workflow avec de vrais Environments — pas
@@ -220,10 +224,24 @@ avec org=... action=create »*. Une fois les vrais secrets saisis dans Vault
 (Étape 2 ci-dessus), lancer manuellement `proxmox-deploy-cluster.yml` avec
 `action=create` → job `apply-infra-create` (VMs créées).
 
-**Suppression d'un dossier `clusters/<org>/`** :
-`vault-create-org.yml` détecte la suppression (ne touche à rien côté Vault),
-affiche dans son résumé : *« lancer 2 - Proxmox: apply/destroy cluster avec
-org=... action=delete »*. Lancer manuellement `proxmox-deploy-cluster.yml`
-avec `action=delete` → job `destroy-infra` (VMs détruites, checkout du commit
-précédent au dossier supprimé) puis `vault-cleanup` (structure Vault de l'org
-supprimée).
+**Supprimer un cluster** — ne jamais supprimer `clusters/<org>/` soi-même :
+
+Lancer directement `proxmox-deploy-cluster.yml` (**Actions > 2 - Proxmox:
+apply/destroy cluster > Run workflow**) avec `org=<org>` et `action=delete`,
+dossier encore présent dans le repo. Le job `destroy-infra` détruit les VMs
+(le code Terraform est disponible directement dans le checkout normal, plus
+besoin de retrouver un commit de suppression dans l'historique — ancien
+mécanisme abandonné, trop fragile si des commits s'accumulent entre la
+suppression du dossier et le déclenchement de la pipeline), puis **la
+pipeline elle-même** committe et pousse la suppression du dossier sur `main`.
+Le job `vault-cleanup` termine en nettoyant la structure Vault de l'org.
+
+Ce commit automatique redéclenche `vault-create-org.yml` (même trigger sur
+`terraform/clusters/**`) — normal, il se termine sans rien faire (`action=none`,
+aucune nouvelle org à créer dans ce diff).
+
+> **Permission requise** : le commit automatique utilise le `GITHUB_TOKEN` par
+> défaut du job pour pousser sur `main`. Vérifier que les Actions du repo ont
+> la permission d'écriture (Settings > Actions > General > Workflow
+> permissions > **Read and write permissions**), sinon le step `Remove cluster
+> folder and push` échoue avec une erreur d'autorisation.
