@@ -5,7 +5,7 @@
 org                      = "prod"
 node_count               = 3
 additional_workers_count = 0
-tags                     = ["devver", "prod"]
+tags                     = ["devver", "prod", "test-deploy"]
 
 proxmox_node  = "PROXMOX-PVE1"
 datastore_id  = "SSD-PVE-DATA"

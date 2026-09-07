@@ -3,6 +3,10 @@
 Provisionnement de clusters RKE2 sur Proxmox, multi-organisation, avec state
 sur Backblaze B2 et secrets dans HashiCorp Vault.
 
+> Pour déployer un cluster de A à Z (commandes prêtes à copier-coller), voir
+> [`DEPLOY.md`](DEPLOY.md). Ce README explique le *pourquoi* de chaque mécanisme ;
+> `DEPLOY.md` est la procédure condensée.
+
 ## Structure
 
 ```
@@ -63,8 +67,8 @@ Mount KV v2 unique : **`devver-infra-deployment`**, avec à sa racine :
 - `devver-infra-deployment/proxmox` : credentials API Proxmox (`token_id`, `token_secret`), partagés entre toutes les orgs.
 - `devver-infra-deployment/s3-backend` : credentials B2 (`key_id`, `application_key`) pour le backend S3, partagés entre toutes les orgs.
 - `devver-infra-deployment/ansible` : réservé pour un usage futur, pas encore géré par ce Terraform (pas de policy dessus pour l'instant).
-- `devver-infra-deployment/vm_secret_template` : secret "template" (`vm_user`, `ssh_public_key`, `vm_password` en placeholder) saisi manuellement une fois, cloné vers chaque nouvelle org.
-- `devver-infra-deployment/<org>` : copie du template pour cette org — créée automatiquement par `vault/` (voir plus bas). `vm_password` y reste le placeholder du template tant que tu ne l'as pas remplacé à la main ; une fois remplacé, plus jamais écrasé par un futur apply.
+- `devver-infra-deployment/vm_secret_template` : secret "template" (`vm_user`, `ssh_public_key`, `vm_password`/`ssh_private_key` en placeholders) saisi manuellement une fois, cloné vers chaque nouvelle org.
+- `devver-infra-deployment/<org>` : copie du template pour cette org — créée automatiquement par `vault/` (voir plus bas). `vm_password`/`ssh_private_key` y restent les placeholders du template tant que tu ne les as pas remplacés à la main ; une fois remplacés, plus jamais écrasés par un futur apply.
 
 Une policy read-only + un role AppRole dédiés existent par org (accès à `proxmox` + `<org>`), créés par `vault/`. Un role à part (`terraform-backblaze`, TTL court) ne donne accès qu'à `devver-infra-deployment/s3-backend`.
 
@@ -76,13 +80,14 @@ création**. Elle porte `lifecycle { ignore_changes = [data_json] }` : dès que 
 existe, Terraform ignore toute différence entre le contenu réel dans Vault et ce que le
 `.tf` décrirait, même en relançant `apply` pour d'autres orgs. Concrètement :
 
-- 1er `apply` pour une nouvelle org → le secret `<org>` est créé avec `vm_user`/`ssh_public_key`/`vm_password` copiés du template (le placeholder de `vm_password` atterrit donc dans le state de `vault/` à ce moment précis).
-- Toute modification manuelle ensuite dans l'UI Vault (remplacer le placeholder `vm_password` par une vraie valeur, changer la clé SSH...) est **définitivement préservée** et ne remonte plus jamais dans le state — Terraform ignore ce secret après sa création.
+- 1er `apply` pour une nouvelle org → le secret `<org>` est créé avec `vm_user`/`ssh_public_key`/`vm_password`/`ssh_private_key` copiés du template (les placeholders de `vm_password`/`ssh_private_key` atterrissent donc dans le state de `vault/` à ce moment précis).
+- Toute modification manuelle ensuite dans l'UI Vault (remplacer les placeholders `vm_password`/`ssh_private_key` par de vraies valeurs, changer la clé SSH publique...) est **définitivement préservée** et ne remonte plus jamais dans le state — Terraform ignore ce secret après sa création.
 
 Cette resource vit uniquement dans `vault/` (Terraform admin) — les `clusters/<org>/`
 ne font que **lire** `<org>` (`data source`), jamais écrire, donc aucun de ces secrets
 n'atterrit dans leur state à eux. Seul le state de `vault/` contient une trace de ces
-champs, et uniquement le placeholder initial pour `vm_password` — jamais la vraie valeur.
+champs, et uniquement les placeholders initiaux pour `vm_password`/`ssh_private_key` —
+jamais les vraies valeurs.
 
 ### Pourquoi les credentials B2 ne sont pas lues via une data source Terraform
 
@@ -99,7 +104,8 @@ si la variable n'est pas déjà exportée dans le shell).
 
 ## Mise en place
 
-Trois grandes étapes (pensées pour devenir les trois stages d'une future pipeline) :
+Trois grandes étapes, qui correspondent aux jobs de la pipeline CI
+(voir [`DEPLOY.md`](DEPLOY.md#via-la-pipeline-ci)) :
 **0-1. créer la structure Vault** → **2. action manuelle (compléter les secrets)** → **3. déployer l'infra**.
 
 ### 0. Amorçage — le seul point où Vault n'est pas encore la source
@@ -127,14 +133,15 @@ vault kv put devver-infra-deployment/s3-backend key_id=... application_key=...
 ```
 
 Écrire aussi le template, avant le premier `apply` (il est lu par la resource qui clone
-vers chaque org) — `vm_password` y est un simple placeholder, à remplacer ensuite dans
-chaque `<org>` individuellement, jamais utilisé tel quel :
+vers chaque org) — `vm_password`/`ssh_private_key` y sont de simples placeholders, à
+remplacer ensuite dans chaque `<org>` individuellement, jamais utilisés tels quels :
 
 ```bash
 vault kv put devver-infra-deployment/vm_secret_template \
   vm_user=devver \
   ssh_public_key="ssh-ed25519 ..." \
-  vm_password="CHANGE_ME"
+  vm_password="CHANGE_ME" \
+  ssh_private_key="CHANGE_ME"
 ```
 
 ### 1. Créer/mettre à jour la structure Vault (à chaque ajout d'org)
@@ -165,12 +172,12 @@ vault write -f auth/terraform-orgs/role/terraform-prod/secret-id
 ### 2. Action manuelle — compléter les secrets de l'org
 
 Dans l'UI Vault (ou CLI), sur `devver-infra-deployment/<org>` fraîchement créé :
-remplacer le placeholder `vm_password` par une vraie valeur, ou ajuster
-`vm_user`/`ssh_public_key` si cette org a besoin de credentials différents du
+remplacer les placeholders `vm_password`/`ssh_private_key` par de vraies valeurs, ou
+ajuster `vm_user`/`ssh_public_key` si cette org a besoin de credentials différents du
 template. Ces valeurs ne seront plus jamais écrasées par Terraform.
 
 ```bash
-vault kv patch devver-infra-deployment/prod vm_password='...'
+vault kv patch devver-infra-deployment/prod vm_password='...' ssh_private_key='...'
 ```
 
 ### 3. Déployer un cluster
@@ -197,13 +204,21 @@ workers additionnels — convention RKE2 type `lablabs.rke2`).
    (remplacer `REPLACE_ME_ORG`, recréer le symlink `ip-plan.auto.tfvars`).
 2. Ajouter l'org à `org_subnet_index` dans `ip-plan.auto.tfvars` (prochain index libre).
 3. Étape 1 : ajouter l'org à `vault/` (`terraform apply -var='orgs=["prod","<org>"]'`), générer son `secret_id`.
-4. Étape 2 : compléter `vm_password` (et ajuster le reste si besoin) dans `devver-infra-deployment/<org>`.
+4. Étape 2 : compléter `vm_password`/`ssh_private_key` (et ajuster le reste si besoin) dans `devver-infra-deployment/<org>`.
 5. Étape 3 : `terraform init/plan/apply` dans `clusters/<org>/`.
+
+## Pipeline CI
+
+Les 3 étapes ci-dessus sont automatisées par deux workflows,
+[`detect-and-prepare.yml`](../.github/workflows/detect-and-prepare.yml) (auto)
+et [`continue-deploy.yml`](../.github/workflows/continue-deploy.yml) (manuel) :
+un push ajoutant/supprimant un dossier `clusters/<org>/` déclenche la
+détection et la structure Vault, puis un second déclenchement manuel termine
+l'apply/destroy infra (découpage en deux dû à l'absence des Environments
+GitHub natifs sur repo privé en plan Free). Voir
+[`DEPLOY.md`](DEPLOY.md#via-la-pipeline-ci) pour le setup initial (AppRole
+`terraform-ci`, secrets GitHub) et le détail du flux.
 
 ## Prochaines étapes
 
-- Pipeline GitHub Actions sur runner on-prem pour l'exécution (le runner portera un
-  token/AppRole Vault propre, pour appeler `login.sh` sans intervention humaine) —
-  les 3 étapes ci-dessus deviendraient naturellement 3 stages : structure Vault →
-  action manuelle (ou approbation) → déploiement infra.
 - Consommation de `output "metallb_ip"` par l'installation MetalLB du cluster.

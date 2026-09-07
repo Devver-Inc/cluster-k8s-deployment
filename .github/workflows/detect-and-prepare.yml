@@ -1,0 +1,99 @@
+name: Detect and prepare
+
+# Déclenché uniquement par un changement sous terraform/clusters/ (ajout ou
+# suppression d'un dossier d'org). Détecte le cas, prépare la structure Vault
+# pour une création, puis s'arrête — la suite (apply/destroy infra) se
+# poursuit manuellement via le workflow "Continue deploy" (workflow_dispatch).
+#
+# Pourquoi en 2 workflows séparés plutôt qu'un seul avec des gates : les
+# GitHub Environments avec required reviewers (le mécanisme natif de pause)
+# ne sont pas disponibles sur un repo privé en plan Free. Un second
+# déclenchement manuel joue ce rôle à la place, gratuitement sur tout plan.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "terraform/clusters/**"
+
+env:
+  VAULT_ADDR: ${{ vars.VAULT_ADDR }}
+
+jobs:
+  detect:
+    runs-on: self-hosted
+    outputs:
+      org: ${{ steps.detect.outputs.org }}
+      action: ${{ steps.detect.outputs.action }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # historique complet nécessaire pour diff before/after
+      - id: detect
+        run: |
+          bash terraform/scripts/detect-org-change.sh \
+            "${{ github.event.before }}" "${{ github.sha }}"
+
+  # Uniquement pour une création : prépare la structure Vault de la nouvelle
+  # org AVANT que l'admin y saisisse les vrais secrets. Pour une suppression,
+  # rien ne doit toucher à Vault avant le destroy de l'infra (ordre déjà
+  # établi : détruire l'infra avant de supprimer ses secrets) — ce job ne
+  # s'exécute donc pas dans ce cas.
+  vault-sync:
+    needs: detect
+    if: needs.detect.outputs.action == 'create'
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Vault auth + fetch B2 credentials
+        uses: hashicorp/vault-action@v3
+        with:
+          url: ${{ vars.VAULT_ADDR }}
+          method: approle
+          roleId: ${{ secrets.VAULT_CI_ROLE_ID }}
+          secretId: ${{ secrets.VAULT_CI_SECRET_ID }}
+          secrets: |
+            devver-infra-deployment/data/s3-backend key_id | AWS_ACCESS_KEY_ID ;
+            devver-infra-deployment/data/s3-backend application_key | AWS_SECRET_ACCESS_KEY
+
+      - name: List orgs
+        id: orgs
+        run: echo "orgs=$(bash terraform/scripts/list-orgs.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: Terraform init
+        working-directory: terraform/vault
+        run: terraform init -backend-config=backend.hcl -input=false
+
+      - name: Terraform apply (create org structure)
+        working-directory: terraform/vault
+        run: terraform apply -auto-approve -input=false -var='orgs=${{ steps.orgs.outputs.orgs }}'
+
+  # Toujours exécuté en dernier (création ou suppression) : affiche ce que
+  # l'admin doit faire pour poursuivre, dans le résumé du run (plus visible
+  # que les logs bruts).
+  summary:
+    needs: [detect, vault-sync]
+    if: always() && needs.detect.result == 'success'
+    runs-on: self-hosted
+    steps:
+      - name: Write summary
+        env:
+          ORG: ${{ needs.detect.outputs.org }}
+          ACTION: ${{ needs.detect.outputs.action }}
+        run: |
+          {
+            echo "## Suite à donner"
+            echo ""
+            if [[ "${ACTION}" == "create" ]]; then
+              echo "Structure Vault créée pour \`${ORG}\`. Avant de continuer :"
+              echo ""
+              echo "1. Saisir les vrais secrets dans Vault (\`vm_password\`, \`ssh_private_key\`, ...) sur \`devver-infra-deployment/${ORG}\`."
+              echo "2. Aller dans **Actions > Continue deploy > Run workflow**."
+              echo "3. Renseigner : \`org=${ORG}\` et \`action=create\`."
+            else
+              echo "Suppression de \`${ORG}\` détectée. Pour continuer (destruction irréversible de l'infra) :"
+              echo ""
+              echo "1. Aller dans **Actions > Continue deploy > Run workflow**."
+              echo "2. Renseigner : \`org=${ORG}\` et \`action=delete\`."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
