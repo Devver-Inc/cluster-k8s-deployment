@@ -177,12 +177,18 @@ resource "vault_policy" "ci" {
       capabilities = ["create", "read", "update", "delete", "list"]
     }
 
+    # create/update nécessaires : vault_kv_secret_v2.org_secret clone
+    # vm_secret_template vers devver-infra-deployment/<org> à la création
+    # d'une org (PUT). delete nécessaire pour vault-cleanup (suppression
+    # d'une org retirée du for_each). read pour vm_secret_template lui-même
+    # et pour les data sources des roles terraform-<org> (auth/token/create
+    # crée un child token limité par LEUR policy, pas celle-ci).
     path "devver-infra-deployment/data/*" {
-      capabilities = ["read"]
+      capabilities = ["create", "read", "update", "delete"]
     }
 
     path "devver-infra-deployment/metadata/*" {
-      capabilities = ["list", "read"]
+      capabilities = ["list", "read", "delete"]
     }
 
     path "auth/token/create" {
