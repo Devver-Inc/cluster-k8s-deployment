@@ -49,7 +49,9 @@ ansible-playbook -i "$INV" -e cluster_org=<org> playbooks/03-cluster-init.yml
 
 1. **`01-base.yml`** (tous les nœuds) — maj système, DNS, désactive IPv6 et le
    swap, charge les modules kernel requis par RKE2 (`overlay`,
-   `br_netfilter`) + sysctl associés, active chronyd (NTP).
+   `br_netfilter`) + sysctl associés, active chronyd (NTP) et
+   `qemu-guest-agent` (requis côté OS pour que Proxmox obtienne l'IP/état
+   réel de la VM — Terraform active déjà `agent.enabled=true` côté hyperviseur).
 2. **`02-dependencies.yml`** (tous les nœuds) — `nfs-utils` (préreq de la
    storage class `nfs.csi.k8s.io`, le CSI driver lui-même n'est pas déployé
    ici), ouvre les ports firewalld RKE2 (différents selon `[server]`/`[agent]`,
