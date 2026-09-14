@@ -1,0 +1,159 @@
+---
+# Init du cluster RKE2 : 1er master → masters suivants → agents, puis
+# récupération du kubeconfig + token de jonction, écrits dans Vault.
+# À lancer après 02-dependencies.yml.
+#
+# Jonction : tous les noeuds pointent directement vers l'IP du 1er master
+# (pas de VIP/HAProxy pour l'instant — cf. terraform/README.md pour la
+# migration future vers un load-balancer devant les masters).
+#
+# Usage :
+#   ansible-playbook -i ../terraform/clusters/<org>/ansible-inventory/inventory-<org>.ini \
+#     -e cluster_org=<org> playbooks/03-cluster-init.yml
+
+- name: Initialiser le premier master RKE2
+  hosts: server[0]
+  gather_facts: false
+
+  tasks:
+    - name: Créer /etc/rancher/rke2/
+      ansible.builtin.file:
+        path: /etc/rancher/rke2
+        state: directory
+        mode: "0755"
+
+    - name: "Écrire la config RKE2 du premier master (pas de champ server, c'est lui le point d'entrée)"
+      ansible.builtin.copy:
+        dest: /etc/rancher/rke2/config.yaml
+        content: |
+          write-kubeconfig-mode: "0640"
+        mode: "0644"
+
+    - name: Démarrer et activer rke2-server
+      ansible.builtin.systemd:
+        name: rke2-server
+        state: started
+        enabled: true
+
+    - name: Attendre que le node-token soit généré
+      ansible.builtin.wait_for:
+        path: /var/lib/rancher/rke2/server/node-token
+        timeout: 300
+
+    - name: Attendre que l'API Kubernetes réponde
+      ansible.builtin.wait_for:
+        port: 6443
+        host: 127.0.0.1
+        timeout: 300
+
+    - name: Lire le node-token généré
+      ansible.builtin.slurp:
+        src: /var/lib/rancher/rke2/server/node-token
+      register: rke2_node_token_raw
+
+    - name: Exposer le token pour les plays suivants
+      ansible.builtin.set_fact:
+        rke2_join_token: "{{ rke2_node_token_raw.content | b64decode | trim }}"
+        cacheable: true
+
+- name: Joindre les masters supplémentaires
+  hosts: server:!server[0]
+  gather_facts: false
+  vars:
+    rke2_join_token: "{{ hostvars[groups['server'][0]]['rke2_join_token'] }}"
+
+  tasks:
+    - name: Créer /etc/rancher/rke2/
+      ansible.builtin.file:
+        path: /etc/rancher/rke2
+        state: directory
+        mode: "0755"
+
+    - name: Écrire la config RKE2 (jonction vers le premier master)
+      ansible.builtin.copy:
+        dest: /etc/rancher/rke2/config.yaml
+        content: |
+          server: "https://{{ rke2_first_server_ip }}:9345"
+          token: "{{ rke2_join_token }}"
+          write-kubeconfig-mode: "0640"
+        mode: "0644"
+        no_log: true
+
+    - name: Démarrer et activer rke2-server
+      ansible.builtin.systemd:
+        name: rke2-server
+        state: started
+        enabled: true
+
+- name: Joindre les workers (agents)
+  hosts: agent
+  gather_facts: false
+  vars:
+    rke2_join_token: "{{ hostvars[groups['server'][0]]['rke2_join_token'] }}"
+
+  tasks:
+    - name: Créer /etc/rancher/rke2/
+      ansible.builtin.file:
+        path: /etc/rancher/rke2
+        state: directory
+        mode: "0755"
+
+    - name: Écrire la config RKE2 (jonction vers le premier master)
+      ansible.builtin.copy:
+        dest: /etc/rancher/rke2/config.yaml
+        content: |
+          server: "https://{{ rke2_first_server_ip }}:9345"
+          token: "{{ rke2_join_token }}"
+        mode: "0644"
+        no_log: true
+
+    - name: Démarrer et activer rke2-agent
+      ansible.builtin.systemd:
+        name: rke2-agent
+        state: started
+        enabled: true
+
+- name: Récupérer le kubeconfig et le token, les écrire dans Vault
+  hosts: server[0]
+  gather_facts: false
+
+  tasks:
+    - name: Attendre que tous les noeuds aient rejoint (kubelet up)
+      ansible.builtin.pause:
+        seconds: 30
+
+    - name: Lire le kubeconfig généré par RKE2
+      ansible.builtin.slurp:
+        src: /etc/rancher/rke2/rke2.yaml
+      register: rke2_kubeconfig_raw
+
+    - name: Adapter le kubeconfig (127.0.0.1 -> IP réelle du premier master)
+      ansible.builtin.set_fact:
+        rke2_kubeconfig_final: "{{ (rke2_kubeconfig_raw.content | b64decode)
+          | regex_replace('https://127\\.0\\.0\\.1:6443', 'https://' + rke2_first_server_ip + ':6443') }}"
+
+    # vault_kv2_write fait un PUT complet (écrase tout le secret) — on repart
+    # donc de cluster_secrets (déjà lu en entier en group_vars/all.yml au
+    # début du run) et on y combine les 2 nouveaux champs, pour ne perdre
+    # aucun champ existant (vm_user, ssh_public_key, vm_password,
+    # ssh_private_key). Ne PAS remplacer par un data_json partiel.
+    - name: Fusionner les secrets existants avec kubeconfig + token
+      ansible.builtin.set_fact:
+        cluster_secrets_updated: "{{ cluster_secrets | combine({'kubeconfig': rke2_kubeconfig_final, 'rke2_token': rke2_join_token}) }}"
+      no_log: true
+
+    - name: Écrire kubeconfig + token dans Vault (sans écraser les champs existants)
+      community.hashi_vault.vault_kv2_write:
+        url: "{{ vault_addr }}"
+        auth_method: "{{ vault_auth_method }}"
+        mount_point: "{{ vault_auth_mount_point }}"
+        role_id: "{{ vault_role_id }}"
+        secret_id: "{{ vault_secret_id }}"
+        engine_mount_point: "{{ vault_kv_mount }}"
+        path: "{{ vault_cluster_secret_path }}"
+        data: "{{ cluster_secrets_updated }}"
+      no_log: true
+
+    - name: Cluster RKE2 initialisé
+      ansible.builtin.debug:
+        msg: "Cluster '{{ cluster_org }}' prêt — kubeconfig et rke2_token écrits dans devver-infra-deployment/{{ cluster_org }}."

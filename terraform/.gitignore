@@ -6,6 +6,3 @@ terraform.tfvars
 *.tfvars.local
 crash.log
 crash.*.log
-
-# Inventaires Ansible générés par le module (régénérés à chaque apply)
-clusters/*/generated/

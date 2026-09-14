@@ -2,36 +2,28 @@
 
 Provisionnement et déploiement de clusters Kubernetes (RKE2) sur une
 infrastructure Proxmox on-prem, pour plusieurs organisations/environnements,
-entièrement piloté par Terraform et automatisé via une pipeline CI sur runner
+piloté par Terraform + Ansible et automatisé via des pipelines CI sur runner
 self-hosted.
 
 ## Vue d'ensemble
 
-```
-Admin                 terraform/clusters/<org>/       CI (GitHub Actions)
-  │                          │                              │
-  │  ajoute/supprime ───────▶│                              │
-  │  un dossier org          │──── push sur main ──────────▶│
-  │                          │                              │
-  │                          │              ┌───────────────┴───────────────┐
-  │                          │              │  vault/  (structure secrets)  │
-  │                          │              └───────────────┬───────────────┘
-  │                          │                              │
-  │  ◀── saisit les vrais secrets dans Vault ── gate ────────┤ (approbation manuelle)
-  │       (vm_password, ssh_private_key, ...)                │
-  │                          │              ┌───────────────┴───────────────┐
-  │                          │              │  clusters/<org>/ (VMs Proxmox)│
-  │                          │              └────────────────────────────────┘
-  ▼                                                          ▼
-HashiCorp Vault  ◀──────── secrets ────────────────── Proxmox (VMs) + Backblaze B2 (state)
-```
+Trois workflows GitHub Actions indépendants, chacun avec son propre
+déclencheur :
 
-Un seul point d'entrée côté admin : **ajouter ou supprimer un dossier sous
-`terraform/clusters/`**. Tout le reste — création de la structure Vault pour
-la nouvelle organisation, pause pour la saisie manuelle des secrets, création
-ou destruction des VMs sur Proxmox — s'enchaîne automatiquement via la
-pipeline GitHub Actions, avec des points de validation humaine explicites
-avant toute action sensible (saisie de secrets, destruction d'infrastructure).
+1. **`1 - Vault: création structure org`** — push sur `terraform/clusters/**`
+   détecte automatiquement une nouvelle org et crée sa structure Vault
+   (mount, policy, secret cloné depuis un template). N'agit que sur l'org
+   ajoutée, jamais sur les autres.
+2. **`2 - Proxmox: apply/destroy cluster`** — déclenché manuellement
+   (`workflow_dispatch`, org + action en input) : crée les VMs (après que
+   l'admin a saisi les vrais secrets dans Vault), ou détruit l'infra d'une
+   org puis nettoie sa structure Vault.
+3. **`3 - Ansible: configurer les clusters`** — push sur `ansible/**`
+   applique automatiquement les playbooks RKE2 à **tous** les clusters
+   existants (idempotent, indépendant des deux workflows précédents).
+
+Voir [`terraform/DEPLOY.md`](terraform/DEPLOY.md) et
+[`ansible/README.md`](ansible/README.md) pour le détail de chaque flux.
 
 ## Composants
 
@@ -41,14 +33,14 @@ avant toute action sensible (saisie de secrets, destruction d'infrastructure).
 | **Proxmox** | Hyperviseur on-prem qui héberge les VMs des clusters. |
 | **HashiCorp Vault** | Source unique des secrets (credentials Proxmox, backend B2, SSH/login VM par organisation) — jamais de secret en clair dans le repo. |
 | **Backblaze B2** | Stockage du `state` Terraform (backend compatible S3), un fichier par module (`vault/`, chaque `clusters/<org>/`). |
-| **GitHub Actions (runner self-hosted)** | Exécute la pipeline CI/CD sur l'infrastructure on-prem, déclenchée par les changements dans `terraform/clusters/`. |
-| **Ansible** *(à venir)* | Configuration post-provisioning des VMs (installation RKE2, etc.) à partir de l'inventaire généré par Terraform. |
+| **GitHub Actions (runner self-hosted)** | Exécute la pipeline CI/CD sur l'infrastructure on-prem — un workflow pour la structure Vault, un pour l'infra Proxmox, un pour la configuration Ansible, indépendants les uns des autres. |
+| **Ansible** | Configuration post-provisioning des VMs (installation RKE2) à partir de l'inventaire généré par Terraform et des secrets Vault. |
 
 ## Structure du repo
 
 ```
 .
-├── .github/workflows/       # pipeline CI (vault-create-org.yml + proxmox-deploy-cluster.yml)
+├── .github/workflows/       # pipeline CI (vault-create-org.yml, proxmox-deploy-cluster.yml, ansible-configure-clusters.yml)
 ├── terraform/
 │   ├── README.md            # documentation technique détaillée (le "pourquoi")
 │   ├── DEPLOY.md            # procédure pas-à-pas, manuelle ET pipeline (le "comment")
@@ -58,9 +50,9 @@ avant toute action sensible (saisie de secrets, destruction d'infrastructure).
 │   ├── vault/                # structure Vault (mount, policies, secrets par org) en Terraform
 │   ├── clusters/
 │   │   ├── _template/          # dossier à copier pour créer une nouvelle organisation
-│   │   └── <org>/               # un dossier par organisation, state Terraform indépendant
+│   │   └── <org>/               # un dossier par organisation, state Terraform + inventaire Ansible
 │   └── scripts/               # scripts utilisés par la pipeline CI
-└── ansible/                  # (vide pour l'instant — post-provisioning des clusters)
+└── ansible/                  # playbooks d'installation RKE2 (voir ansible/README.md)
 ```
 
 ## Pour commencer

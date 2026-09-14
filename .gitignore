@@ -1,0 +1,3 @@
+# Clé SSH privée temporaire écrite par ansible/fetch-ssh-key.sh — jamais
+# committée, toujours supprimée en fin de run (trap EXIT).
+ansible/.ssh_key_*

@@ -1,5 +1,5 @@
 resource "local_file" "ansible_inventory" {
-  filename = "${path.root}/generated/inventory-${var.org}.ini"
+  filename = "${path.root}/ansible-inventory/inventory-${var.org}.ini"
   content = templatefile("${path.module}/inventory.tpl", {
     org               = var.org
     vm_user           = var.vm_user

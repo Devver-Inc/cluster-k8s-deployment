@@ -1,0 +1,13 @@
+---
+rke2_install_type: server
+
+# Ports firewalld ouverts sur les noeuds control-plane (RKE2 docs — HA server nodes).
+firewalld_ports:
+  - { port: 6443, proto: tcp }    # API Kubernetes
+  - { port: 9345, proto: tcp }    # jonction RKE2 (supervisor)
+  - { port: 2379, proto: tcp }    # etcd client
+  - { port: 2380, proto: tcp }    # etcd peer
+  - { port: 10250, proto: tcp }   # kubelet
+  - { port: 10251, proto: tcp }   # kube-scheduler
+  - { port: 10252, proto: tcp }   # kube-controller-manager
+  - { port: 8472, proto: udp }    # VXLAN (Flannel CNI)

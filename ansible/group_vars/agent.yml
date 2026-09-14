@@ -1,0 +1,7 @@
+---
+rke2_install_type: agent
+
+# Ports firewalld ouverts sur les noeuds worker-only (RKE2 docs — agent nodes).
+firewalld_ports:
+  - { port: 10250, proto: tcp }   # kubelet
+  - { port: 8472, proto: udp }    # VXLAN (Flannel CNI)

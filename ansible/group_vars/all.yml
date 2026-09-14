@@ -1,0 +1,46 @@
+---
+# Configuration Vault — même AppRole terraform-ci que côté Terraform (voir
+# terraform/vault/main.tf), sa policy couvre déjà la lecture/écriture sur
+# devver-infra-deployment/data/*. role_id/secret_id sont fournis à l'exécution
+# via variables d'environnement (VAULT_ROLE_ID/VAULT_SECRET_ID), jamais en dur
+# ici — cohérent avec le reste du projet (login.sh, workflows CI).
+vault_addr: "https://vault.devver.app"
+vault_auth_method: approle
+vault_auth_mount_point: terraform-orgs
+vault_role_id: "{{ lookup('env', 'VAULT_ROLE_ID') }}"
+vault_secret_id: "{{ lookup('env', 'VAULT_SECRET_ID') }}"
+
+# cluster_org DOIT être fourni au lancement (-e cluster_org=<org>) — détermine
+# le chemin Vault devver-infra-deployment/<org> et le nom de l'inventaire.
+vault_kv_mount: devver-infra-deployment
+vault_cluster_secret_path: "{{ cluster_org }}"
+
+# Version RKE2 installée par 02-dependencies.yml (script officiel get.rke2.io).
+rke2_version: "v1.30.5+rke2r1"
+
+# IP du 1er master du groupe [server] — point d'entrée unique pour la
+# jonction des autres masters/agents (pas de VIP/HAProxy pour l'instant,
+# cf. terraform/README.md et ansible/README.md pour la migration future).
+rke2_first_server: "{{ groups['server'][0] }}"
+rke2_first_server_ip: "{{ hostvars[rke2_first_server]['ansible_host'] }}"
+
+# Secrets de l'org, lus une fois depuis Vault (KV v2) — utilisés comme
+# ansible_ssh_private_key_file / ansible_become_password. La clé privée est
+# écrite dans un fichier temporaire local le temps du run (jamais committée),
+# nettoyé par un handler dans le playbook qui l'utilise.
+cluster_secrets: "{{ lookup('community.hashi_vault.vault_kv2_get',
+  vault_cluster_secret_path,
+  engine_mount_point=vault_kv_mount,
+  url=vault_addr,
+  auth_method=vault_auth_method,
+  mount_point=vault_auth_mount_point,
+  role_id=vault_role_id,
+  secret_id=vault_secret_id).secret }}"
+
+ansible_user: "{{ cluster_secrets.vm_user }}"
+# Écrit par fetch-ssh-key.sh AVANT de lancer ansible-playbook — ce champ est
+# résolu avant la première connexion SSH, donc aucune tâche Ansible ne peut
+# l'écrire à temps (voir ansible/README.md).
+ansible_ssh_private_key_file: "{{ playbook_dir }}/.ssh_key_{{ cluster_org }}"
+ansible_become: true
+ansible_become_password: "{{ cluster_secrets.vm_password }}"

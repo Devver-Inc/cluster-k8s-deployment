@@ -194,7 +194,8 @@ terraform plan
 terraform apply
 ```
 
-L'inventaire Ansible est généré dans `clusters/prod/generated/inventory-prod.ini`
+L'inventaire Ansible est généré dans `clusters/prod/ansible-inventory/inventory-prod.ini`
+(committé dans git — contenu non sensible : IP/hostname/user uniquement)
 (groupes `[server]` pour les nœuds control-plane+worker, `[agent]` pour les
 workers additionnels — convention RKE2 type `lablabs.rke2`).
 

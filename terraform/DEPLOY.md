@@ -127,7 +127,7 @@ terraform apply
 
 ```bash
 terraform output metallb_ip
-cat generated/inventory-prod.ini   # groupes [server]/[agent] peuplés
+cat ansible-inventory/inventory-prod.ini   # groupes [server]/[agent] peuplés
 ```
 
 ## Nettoyage (si besoin)
@@ -187,6 +187,9 @@ workflows eux-mêmes) :
   à faire sur le runner au-delà de l'installation.
 - **`git`** — utilisé par le step `Remove cluster folder and push` (suppression
   d'un cluster, voir plus bas) pour committer et pousser sur `main`.
+- **`ansible`** (+ `ansible-galaxy`) — utilisé par le workflow
+  `3 - Ansible: configurer les clusters` (voir `ansible/README.md`) pour
+  installer RKE2 sur les VMs provisionnées.
 
 > **Isolation** : les jobs `runs-on: self-hosted` s'exécutent **directement sur
 > la machine du runner**, pas dans un conteneur éphémère — contrairement aux

@@ -1,0 +1,75 @@
+name: "3 - Ansible: configurer les clusters"
+
+# Déclenché uniquement par un changement sous ansible/ (playbooks, group_vars,
+# etc.) — volontairement indépendant de Terraform/Vault (aucun trigger sur
+# terraform/clusters/**) : un nouveau cluster créé côté Terraform n'aura
+# Ansible appliqué qu'au prochain push ansible/, ou lancé manuellement en
+# local entre-temps (cf. ansible/README.md).
+#
+# Applique automatiquement les 3 playbooks à TOUS les clusters existants
+# (scan de terraform/clusters/<org>/ via list-orgs.sh, un job par org via une
+# matrix) — accepté sans confirmation manuelle car les playbooks sont
+# idempotents : les rejouer sur un cluster déjà configuré ne doit rien casser.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ansible/**"
+
+env:
+  VAULT_ADDR: ${{ vars.VAULT_ADDR }}
+
+jobs:
+  list-clusters:
+    runs-on: self-hosted
+    outputs:
+      orgs: ${{ steps.list.outputs.orgs }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: list
+        run: echo "orgs=$(bash terraform/scripts/list-orgs.sh)" >> "$GITHUB_OUTPUT"
+
+  configure:
+    needs: list-clusters
+    if: needs.list-clusters.outputs.orgs != '[]'
+    runs-on: self-hosted
+    strategy:
+      fail-fast: false
+      matrix:
+        org: ${{ fromJson(needs.list-clusters.outputs.orgs) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Ansible collections
+        working-directory: ansible
+        run: ansible-galaxy collection install -r requirements.yml
+
+      # Même AppRole terraform-ci que Terraform (voir terraform/README.md) —
+      # sa policy couvre déjà la lecture/écriture sur devver-infra-deployment/data/*.
+      - name: Resolve Vault AppRole credentials
+        id: vault_login
+        uses: hashicorp/vault-action@v3
+        with:
+          url: ${{ vars.VAULT_ADDR }}
+          method: approle
+          path: terraform-orgs
+          roleId: ${{ secrets.VAULT_CI_ROLE_ID }}
+          secretId: ${{ secrets.VAULT_CI_SECRET_ID }}
+          exportToken: true
+
+      # ansible_ssh_private_key_file (group_vars/all.yml) est résolu avant la
+      # première connexion SSH — la clé doit donc exister sur disque avant
+      # ansible-playbook (voir ansible/README.md). fetch-ssh-key.sh est
+      # sourcé pour que VAULT_TOKEN (déjà exporté par le step précédent) et le
+      # nettoyage (trap EXIT) restent dans le même shell que les 3 playbooks.
+      - name: Run Ansible playbooks
+        working-directory: ansible
+        run: |
+          set -euo pipefail
+          source ./fetch-ssh-key.sh "${{ matrix.org }}"
+
+          INV="../terraform/clusters/${{ matrix.org }}/ansible-inventory/inventory-${{ matrix.org }}.ini"
+
+          ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" playbooks/01-base.yml
+          ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" playbooks/02-dependencies.yml
+          ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" playbooks/03-cluster-init.yml
