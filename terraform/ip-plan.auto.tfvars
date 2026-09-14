@@ -12,7 +12,7 @@ subnet_size         = 10 # nb d'IP réservées par org (noeuds + 1 IP MetalLB en
 # d'oublier de l'incrémenter puisqu'il n'y a plus qu'ici à l'écrire. Le module
 # échoue explicitement si deux orgs partagent accidentellement le même index.
 org_subnet_index = {
-  test = 0
+  test-ansible = 0
   # preprod = 1
   # orgaX   = 2
 }
