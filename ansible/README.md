@@ -92,11 +92,16 @@ collection `community.hashi_vault` ne sont requis à plat.
 
 L'image contient : `ansible-core`, la collection `community.hashi_vault`, le
 CLI `vault`, `git` (pour `actions/checkout`) et un client SSH. Elle est
-buildée localement sur le runner (pas de registry) et **taguée par le contenu
-de [`runner-images/ansible/VERSION`](../runner-images/ansible/VERSION)** — le
-job `build-image` du workflow réutilise l'image si elle existe déjà pour cette
-version, et ne rebuild que si `VERSION` a été incrémenté manuellement (à faire
-à chaque changement du `Dockerfile` ou de `requirements.yml`).
+buildée par le job `build-image` et poussée sur GHCR
+(`ghcr.io/<owner>/<repo>/ansible-runner`, package privé rattaché au repo),
+**taguée par la ligne `# IMAGE_VERSION=` en tête du
+[`Dockerfile`](../runner-images/ansible/Dockerfile)** — `build-image`
+réutilise l'image si ce tag existe déjà sur GHCR, et ne rebuild/push que si
+cette version a été incrémentée manuellement (à faire à chaque changement du
+`Dockerfile` ou de `ansible/requirements.yml`). Un registry est nécessaire
+même en 100% self-hosted : un job qui déclare `container:` fait toujours un
+`docker pull` avant de démarrer, sans fallback sur le cache Docker local de la
+machine.
 
 La clé SSH privée écrite par `fetch-ssh-key.sh` n'existe que dans le
 filesystem éphémère du conteneur, jamais sur le disque persistant du runner,

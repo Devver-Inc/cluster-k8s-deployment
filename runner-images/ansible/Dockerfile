@@ -1,6 +1,12 @@
-# Image du job "3 - Ansible: configurer les clusters" — construite et
-# réutilisée localement sur le runner self-hosted (pas de registry), rebuild
-# uniquement quand VERSION change (voir .github/workflows/ansible-configure-clusters.yml).
+# Image du job "3 - Ansible: configurer les clusters" — buildée et poussée
+# sur GHCR par le job build-image, réutilisée tant que la version ci-dessous
+# ne change pas (voir .github/workflows/ansible-configure-clusters.yml, qui
+# extrait cette ligne par grep pour construire le tag de l'image).
+#
+# IMAGE_VERSION=2
+#
+# Incrémenter cette version à chaque changement de ce Dockerfile ou de
+# ansible/requirements.yml, pour forcer un rebuild/push.
 #
 # Contient tout ce dont le job a besoin, y compris le login Vault
 # (hashicorp/vault-action tourne dans ce même conteneur) : Ansible + la

@@ -14,8 +14,14 @@ name: "3 - Ansible: configurer les clusters"
 # Tout le job (y compris le login Vault) tourne dans un conteneur Docker
 # custom (runner-images/ansible/Dockerfile) — le runner self-hosted n'a besoin
 # que de Docker, pas d'Ansible/vault CLI installés en dur. L'image est
-# construite une fois et réutilisée tant que runner-images/ansible/VERSION ne
-# change pas (voir job build-image ci-dessous).
+# construite une fois et réutilisée tant que la ligne IMAGE_VERSION= en tête
+# du Dockerfile ne change pas (voir job build-image ci-dessous).
+#
+# Un job qui déclare container: fait toujours un "docker pull" avant de
+# démarrer (jamais de fallback sur le cache local) — l'image doit donc être
+# poussée sur un registry, même en auto-hébergé. On utilise GHCR (gratuit,
+# repo privé inclus), avec GITHUB_TOKEN (permission packages: write, pas de
+# secret supplémentaire à gérer).
 on:
   push:
     branches: [main]
@@ -25,37 +31,53 @@ on:
 
 env:
   VAULT_ADDR: ${{ vars.VAULT_ADDR }}
+  IMAGE_NAME: ghcr.io/${{ github.repository }}/ansible-runner
 
 jobs:
   build-image:
     runs-on: self-hosted
+    permissions:
+      packages: write
+      contents: read
     outputs:
-      tag: ${{ steps.tag.outputs.tag }}
+      image: ${{ steps.tag.outputs.image }}
     steps:
       - uses: actions/checkout@v4
 
       - id: tag
-        run: echo "tag=$(cat runner-images/ansible/VERSION)" >> "$GITHUB_OUTPUT"
+        run: |
+          version="$(grep -oP '^# IMAGE_VERSION=\K.+' runner-images/ansible/Dockerfile)"
+          echo "image=${IMAGE_NAME}:${version}" >> "$GITHUB_OUTPUT"
 
-      # Réutilise l'image si elle existe déjà localement sur le runner pour
-      # cette VERSION — rebuild uniquement quand runner-images/ansible/VERSION
-      # a été incrémenté (donc quand le Dockerfile ou requirements.yml a
-      # changé). Pas de registry : l'image ne vit que sur le disque du runner.
-      - name: Build Ansible runner image (si absente pour cette version)
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Réutilise l'image si elle existe déjà sur GHCR pour cette version —
+      # rebuild uniquement quand la ligne IMAGE_VERSION= du Dockerfile a été
+      # incrémentée (donc quand le Dockerfile ou requirements.yml a changé).
+      - name: Build & push Ansible runner image (si absente pour cette version)
         run: |
           set -euo pipefail
-          IMAGE="ansible-runner:${{ steps.tag.outputs.tag }}"
-          if docker image inspect "$IMAGE" >/dev/null 2>&1; then
-            echo "Image $IMAGE déjà présente, build sauté."
+          IMAGE="${{ steps.tag.outputs.image }}"
+          if docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
+            echo "Image $IMAGE déjà présente sur GHCR, build sauté."
           else
             docker build -f runner-images/ansible/Dockerfile -t "$IMAGE" .
+            docker push "$IMAGE"
           fi
 
   list-clusters:
     needs: build-image
     runs-on: self-hosted
     container:
-      image: ansible-runner:${{ needs.build-image.outputs.tag }}
+      image: ${{ needs.build-image.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     outputs:
       orgs: ${{ steps.list.outputs.orgs }}
     steps:
@@ -68,7 +90,10 @@ jobs:
     if: needs.list-clusters.outputs.orgs != '[]'
     runs-on: self-hosted
     container:
-      image: ansible-runner:${{ needs.build-image.outputs.tag }}
+      image: ${{ needs.build-image.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     strategy:
       fail-fast: false
       matrix:

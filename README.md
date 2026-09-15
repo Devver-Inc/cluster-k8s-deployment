@@ -42,7 +42,7 @@ Voir [`terraform/DEPLOY.md`](terraform/DEPLOY.md) et
 .
 ├── .github/workflows/       # pipeline CI (vault-create-org.yml, proxmox-deploy-cluster.yml, ansible-configure-clusters.yml)
 ├── runner-images/
-│   └── ansible/              # Dockerfile + VERSION de l'image du job Ansible (voir ansible/README.md#isolation)
+│   └── ansible/              # Dockerfile (versionné via IMAGE_VERSION=) de l'image du job Ansible (voir ansible/README.md#isolation)
 ├── terraform/
 │   ├── README.md            # documentation technique détaillée (le "pourquoi")
 │   ├── DEPLOY.md            # procédure pas-à-pas, manuelle ET pipeline (le "comment")
