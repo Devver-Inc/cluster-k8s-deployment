@@ -27,6 +27,6 @@ RUN pip install --no-cache-dir \
         ansible-core~=2.17 \
         hvac
 
-COPY requirements.yml /tmp/requirements.yml
+COPY ansible/requirements.yml /tmp/requirements.yml
 RUN ansible-galaxy collection install -r /tmp/requirements.yml \
     && rm /tmp/requirements.yml
