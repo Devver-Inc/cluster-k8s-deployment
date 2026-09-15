@@ -6,10 +6,15 @@ fonctionnel. Cible : Rocky Linux 9 (template Terraform actuel).
 
 ## Prérequis
 
+Pour un run **local/manuel** :
+
 ```bash
 pip install ansible
 ansible-galaxy collection install -r requirements.yml
 ```
+
+En **CI** (workflow `3 - Ansible`), ces prérequis sont fournis par l'image
+`runner-images/ansible/` — voir [Isolation](#isolation--exécution-en-conteneur).
 
 ## Secrets et inventaire
 
@@ -74,32 +79,48 @@ tard vers une VIP HAProxy devant les masters — implique de reconfigurer
 `server:` sur tous les nœuds et de régénérer le kubeconfig stocké dans Vault
 pour qu'il pointe vers cette VIP plutôt que l'IP du 1er master.
 
-## Isolation (exécution à plat sur le runner)
+## Isolation (exécution en conteneur)
 
-Comme Terraform (décision déjà actée dans `terraform/DEPLOY.md`), ces
-playbooks tournent **directement sur la machine du runner self-hosted**, pas
-dans un conteneur éphémère — pas d'isolation filesystem/process stricte entre
-runs. La clé SSH privée écrite par `fetch-ssh-key.sh` n'existe sur disque que
-le temps du run (toujours nettoyée, `trap EXIT`), même ordre de risque que les
-credentials B2/Vault déjà acceptés en clair en variables d'environnement
-pendant un job CI. Accepté pour ce contexte (repo privé, équipe restreinte) —
-à revisiter avec un conteneur dédié si le contexte de confiance change.
+Contrairement à Terraform (qui reste à plat sur le runner, voir
+`terraform/DEPLOY.md`), **tout le job `configure`** du workflow `3 - Ansible`
+— y compris le login Vault (`hashicorp/vault-action`) et
+`fetch-ssh-key.sh` — tourne dans un conteneur Docker custom défini par
+[`runner-images/ansible/Dockerfile`](../runner-images/ansible/Dockerfile)
+(`container:` au niveau du job dans le YAML). Le runner self-hosted lui-même
+n'a besoin que de Docker installé — ni Ansible, ni le CLI `vault`, ni la
+collection `community.hashi_vault` ne sont requis à plat.
+
+L'image contient : `ansible-core`, la collection `community.hashi_vault`, le
+CLI `vault`, `git` (pour `actions/checkout`) et un client SSH. Elle est
+buildée localement sur le runner (pas de registry) et **taguée par le contenu
+de [`runner-images/ansible/VERSION`](../runner-images/ansible/VERSION)** — le
+job `build-image` du workflow réutilise l'image si elle existe déjà pour cette
+version, et ne rebuild que si `VERSION` a été incrémenté manuellement (à faire
+à chaque changement du `Dockerfile` ou de `requirements.yml`).
+
+La clé SSH privée écrite par `fetch-ssh-key.sh` n'existe que dans le
+filesystem éphémère du conteneur, jamais sur le disque persistant du runner,
+et reste nettoyée en sortie de shell (`trap EXIT`) en plus de disparaître avec
+le conteneur en fin de job.
 
 ## Pipeline CI
 
 [`ansible-configure-clusters.yml`](../.github/workflows/ansible-configure-clusters.yml)
 (« **3 - Ansible: configurer les clusters** » dans l'onglet Actions) —
-automatique, déclenché par un push touchant `ansible/` sur `main`.
-Volontairement **indépendant de Terraform/Vault** (aucun trigger sur
-`terraform/clusters/**`) : un nouveau cluster créé côté Terraform n'a pas
-Ansible appliqué automatiquement, il faut soit lancer les playbooks en local
-(voir ci-dessus), soit attendre/provoquer un prochain push sur `ansible/`.
+automatique, déclenché par un push touchant `ansible/` ou
+`runner-images/ansible/` sur `main`. Volontairement **indépendant de
+Terraform/Vault** (aucun trigger sur `terraform/clusters/**`) : un nouveau
+cluster créé côté Terraform n'a pas Ansible appliqué automatiquement, il faut
+soit lancer les playbooks en local (voir ci-dessus), soit
+attendre/provoquer un prochain push sur `ansible/`.
 
-Applique les 3 playbooks à **tous** les clusters existants d'un coup (scan de
-`terraform/clusters/<org>/` via `terraform/scripts/list-orgs.sh`, un job par
-org via une `matrix` GitHub Actions) — sans confirmation manuelle, accepté
-parce que les playbooks sont **idempotents** : les rejouer sur un cluster déjà
-configuré ne doit rien casser.
+Trois jobs : `build-image` (build/réutilisation de l'image conteneur, voir
+[Isolation](#isolation--exécution-en-conteneur)), `list-clusters` (scan de
+`terraform/clusters/<org>/` via `terraform/scripts/list-orgs.sh`), puis
+`configure` qui applique les 3 playbooks à **tous** les clusters existants
+d'un coup (un job par org via une `matrix` GitHub Actions) — sans confirmation
+manuelle, accepté parce que les playbooks sont **idempotents** : les rejouer
+sur un cluster déjà configuré ne doit rien casser.
 
 ## Prochaines étapes
 

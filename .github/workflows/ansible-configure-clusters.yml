@@ -10,18 +10,52 @@ name: "3 - Ansible: configurer les clusters"
 # (scan de terraform/clusters/<org>/ via list-orgs.sh, un job par org via une
 # matrix) — accepté sans confirmation manuelle car les playbooks sont
 # idempotents : les rejouer sur un cluster déjà configuré ne doit rien casser.
+#
+# Tout le job (y compris le login Vault) tourne dans un conteneur Docker
+# custom (runner-images/ansible/Dockerfile) — le runner self-hosted n'a besoin
+# que de Docker, pas d'Ansible/vault CLI installés en dur. L'image est
+# construite une fois et réutilisée tant que runner-images/ansible/VERSION ne
+# change pas (voir job build-image ci-dessous).
 on:
   push:
     branches: [main]
     paths:
       - "ansible/**"
+      - "runner-images/ansible/**"
 
 env:
   VAULT_ADDR: ${{ vars.VAULT_ADDR }}
 
 jobs:
-  list-clusters:
+  build-image:
     runs-on: self-hosted
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: tag
+        run: echo "tag=$(cat runner-images/ansible/VERSION)" >> "$GITHUB_OUTPUT"
+
+      # Réutilise l'image si elle existe déjà localement sur le runner pour
+      # cette VERSION — rebuild uniquement quand runner-images/ansible/VERSION
+      # a été incrémenté (donc quand le Dockerfile ou requirements.yml a
+      # changé). Pas de registry : l'image ne vit que sur le disque du runner.
+      - name: Build Ansible runner image (si absente pour cette version)
+        run: |
+          set -euo pipefail
+          IMAGE="ansible-runner:${{ steps.tag.outputs.tag }}"
+          if docker image inspect "$IMAGE" >/dev/null 2>&1; then
+            echo "Image $IMAGE déjà présente, build sauté."
+          else
+            docker build -f runner-images/ansible/Dockerfile -t "$IMAGE" .
+          fi
+
+  list-clusters:
+    needs: build-image
+    runs-on: self-hosted
+    container:
+      image: ansible-runner:${{ needs.build-image.outputs.tag }}
     outputs:
       orgs: ${{ steps.list.outputs.orgs }}
     steps:
@@ -30,9 +64,11 @@ jobs:
         run: echo "orgs=$(bash terraform/scripts/list-orgs.sh)" >> "$GITHUB_OUTPUT"
 
   configure:
-    needs: list-clusters
+    needs: [build-image, list-clusters]
     if: needs.list-clusters.outputs.orgs != '[]'
     runs-on: self-hosted
+    container:
+      image: ansible-runner:${{ needs.build-image.outputs.tag }}
     strategy:
       fail-fast: false
       matrix:
@@ -40,12 +76,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Ansible collections
-        working-directory: ansible
-        run: ansible-galaxy collection install -r requirements.yml
-
       # Même AppRole terraform-ci que Terraform (voir terraform/README.md) —
       # sa policy couvre déjà la lecture/écriture sur devver-infra-deployment/data/*.
+      # Tourne dans le même conteneur que les playbooks (voir container: au
+      # niveau du job) : le token Vault n'est jamais exposé à plat sur le runner.
       - name: Resolve Vault AppRole credentials
         id: vault_login
         uses: hashicorp/vault-action@v3

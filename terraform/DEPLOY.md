@@ -187,9 +187,12 @@ workflows eux-mêmes) :
   à faire sur le runner au-delà de l'installation.
 - **`git`** — utilisé par le step `Remove cluster folder and push` (suppression
   d'un cluster, voir plus bas) pour committer et pousser sur `main`.
-- **`ansible`** (+ `ansible-galaxy`) — utilisé par le workflow
-  `3 - Ansible: configurer les clusters` (voir `ansible/README.md`) pour
-  installer RKE2 sur les VMs provisionnées.
+- **`docker`** — utilisé par le workflow `3 - Ansible: configurer les
+  clusters` (voir `ansible/README.md`) pour builder/exécuter l'image
+  `runner-images/ansible/Dockerfile` dans laquelle tourne tout le job (Ansible
+  installé uniquement dans l'image, pas sur le runner). L'utilisateur qui fait
+  tourner le service `actions-runner` doit pouvoir lancer `docker build`/`docker
+  run` (membre du groupe `docker`, ou équivalent).
 
 > **Isolation** : les jobs `runs-on: self-hosted` s'exécutent **directement sur
 > la machine du runner**, pas dans un conteneur éphémère — contrairement aux
@@ -197,9 +200,11 @@ workflows eux-mêmes) :
 > stricte entre jobs ou entre runs, et pas de nettoyage garanti au-delà du
 > dossier de travail du repo (les credentials injectés en variables d'env ne
 > survivent pas au job qui les exporte, mais rien d'autre n'est assaini
-> automatiquement). Accepté comme tel pour ce projet (repo privé, équipe
-> restreinte de confiance) — à revisiter avec un conteneur Docker éphémère par
-> job (`container:` dans le YAML) si le contexte de confiance change.
+> automatiquement). Accepté comme tel pour Terraform/Vault (repo privé, équipe
+> restreinte de confiance). Le workflow `3 - Ansible` fait exception : tout le
+> job (y compris le login Vault) tourne dans le conteneur
+> `runner-images/ansible/` (`container:` dans le YAML) — voir
+> `ansible/README.md#isolation`.
 
 ### Prérequis one-shot (à faire manuellement avant le premier run)
 
