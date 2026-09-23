@@ -30,10 +30,6 @@
         state: started
         enabled: true
 
-    - name: DIAGNOSTIC TEMPORAIRE - group_names et group_vars chargés
-      ansible.builtin.debug:
-        msg: "group_names={{ group_names }} | firewalld_ports défini: {{ firewalld_ports is defined }} | rke2_install_type défini: {{ rke2_install_type is defined }}"
-
     - name: Ouvrir les ports RKE2 requis pour ce rôle (server/agent)
       ansible.posix.firewalld:
         port: "{{ item.port }}/{{ item.proto }}"

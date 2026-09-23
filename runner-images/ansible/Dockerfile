@@ -3,7 +3,7 @@
 # ne change pas (voir .github/workflows/ansible-configure-clusters.yml, qui
 # extrait cette ligne par grep pour construire le tag de l'image).
 #
-# IMAGE_VERSION=6
+# IMAGE_VERSION=7
 #
 # Incrémenter cette version à chaque changement de ce Dockerfile ou de
 # ansible/requirements.yml, pour forcer un rebuild/push.
@@ -31,8 +31,14 @@ RUN apt-get update \
     && rm /tmp/vault.zip \
     && rm -rf /var/lib/apt/lists/*
 
+# Version épinglée strictement : ~=2.17 résolvait vers 2.21.4 (probablement
+# une pré-release/version très récente publiée sous ce schéma), qui a un bug
+# de découverte des group_vars/<nom-groupe>.yml — group_vars/all.yml se
+# chargeait mais pas group_vars/server.yml ni agent.yml malgré une
+# appartenance de groupe correcte (group_names confirmé correct). 2.17.6 est
+# une version stable connue sans ce problème.
 RUN pip install --no-cache-dir \
-        ansible-core~=2.17 \
+        ansible-core==2.17.6 \
         hvac
 
 # Chemin explicite et fixe (indépendant de $HOME, qui peut différer entre le
