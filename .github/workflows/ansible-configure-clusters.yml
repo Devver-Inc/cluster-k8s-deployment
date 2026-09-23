@@ -138,13 +138,20 @@ jobs:
 
           INV="../terraform/clusters/${{ matrix.org }}/ansible-inventory/inventory-${{ matrix.org }}.ini"
 
-          # DIAGNOSTIC TEMPORAIRE — affiche le CHEMIN résolu de
-          # ansible_ssh_private_key_file (jamais son contenu) pour confirmer
-          # si Ansible le calcule correctement, avant de lancer les vrais
-          # playbooks. debug var ne fait jamais de connexion SSH.
-          ansible -i "$INV" -e cluster_org="${{ matrix.org }}" all -m debug \
-            -a "var=ansible_ssh_private_key_file" --connection=local || true
+          # DIAGNOSTIC TEMPORAIRE — vérifie juste l'EXISTENCE et la TAILLE du
+          # fichier (jamais son contenu) au moment précis où Ansible en aurait
+          # besoin, sans passer par aucun lookup Vault ni connexion SSH.
+          KEY_PATH="$(pwd)/.ssh_key_${{ matrix.org }}"
+          echo "chemin attendu par ansible_ssh_private_key_file: playbooks/../.ssh_key_${{ matrix.org }} -> $(cd playbooks/.. && pwd)/.ssh_key_${{ matrix.org }}"
+          ls -la "$KEY_PATH" || echo "ABSENT à cet instant: $KEY_PATH"
 
-          ansible-playbook -vvv -i "$INV" -e cluster_org="${{ matrix.org }}" playbooks/01-base.yml
+          # DIAGNOSTIC TEMPORAIRE 2 — contourne group_vars/all.yml et force
+          # explicitement -e ansible_ssh_private_key_file=<chemin absolu>,
+          # priorité maximale en Ansible. Si ça marche avec -e mais pas via
+          # group_vars, le souci est dans la résolution Jinja de la variable
+          # (ex: playbook_dir non défini dans ce contexte), pas dans la clé
+          # elle-même.
+          ansible-playbook -vvv -i "$INV" -e cluster_org="${{ matrix.org }}" \
+            -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/01-base.yml
           ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" playbooks/02-dependencies.yml
           ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" playbooks/03-cluster-init.yml
