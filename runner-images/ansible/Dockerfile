@@ -3,7 +3,7 @@
 # ne change pas (voir .github/workflows/ansible-configure-clusters.yml, qui
 # extrait cette ligne par grep pour construire le tag de l'image).
 #
-# IMAGE_VERSION=5
+# IMAGE_VERSION=6
 #
 # Incrémenter cette version à chaque changement de ce Dockerfile ou de
 # ansible/requirements.yml, pour forcer un rebuild/push.
@@ -35,6 +35,14 @@ RUN pip install --no-cache-dir \
         ansible-core~=2.17 \
         hvac
 
+# Chemin explicite et fixe (indépendant de $HOME, qui peut différer entre le
+# build de l'image et le runtime du job GitHub Actions container: — le
+# comportement par défaut d'ansible-galaxy, ~/.ansible/collections, s'est
+# révélé invisible à ansible-playbook au runtime malgré une installation
+# réussie au build). ANSIBLE_COLLECTIONS_PATH ci-dessous force les deux à
+# chercher/écrire au même endroit.
+ENV ANSIBLE_COLLECTIONS_PATH=/usr/share/ansible/collections
 COPY ansible/requirements.yml /tmp/requirements.yml
-RUN ansible-galaxy collection install -r /tmp/requirements.yml \
+RUN mkdir -p /usr/share/ansible/collections \
+    && ansible-galaxy collection install -r /tmp/requirements.yml -p /usr/share/ansible/collections \
     && rm /tmp/requirements.yml
