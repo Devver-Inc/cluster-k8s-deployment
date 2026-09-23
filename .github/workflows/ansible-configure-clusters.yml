@@ -138,6 +138,11 @@ jobs:
 
           INV="../terraform/clusters/${{ matrix.org }}/ansible-inventory/inventory-${{ matrix.org }}.ini"
 
-          ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" playbooks/01-base.yml
+          # DIAGNOSTIC TEMPORAIRE -vvv sur le 1er playbook uniquement, pour
+          # voir précisément quel fichier de clé/quelle méthode SSH Ansible
+          # utilise réellement (jamais le contenu de la clé, juste les
+          # commandes SSH exécutées) — la même clé marche en connexion
+          # manuelle mais échoue via ce pipeline.
+          ansible-playbook -vvv -i "$INV" -e cluster_org="${{ matrix.org }}" playbooks/01-base.yml
           ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" playbooks/02-dependencies.yml
           ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" playbooks/03-cluster-init.yml
