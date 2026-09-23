@@ -142,6 +142,14 @@ jobs:
           INV="../terraform/clusters/${{ matrix.org }}/ansible-inventory/inventory-${{ matrix.org }}.ini"
           KEY_PATH="$(pwd)/.ssh_key_${{ matrix.org }}"
 
+          # group_vars/<nom-groupe>.yml (server.yml, agent.yml) ne se
+          # résolvait pas correctement quand l'inventaire est situé loin de
+          # ansible/group_vars/ (seul all.yml se chargeait, pas les fichiers
+          # par groupe) — Ansible cherche group_vars/ à côté du fichier
+          # d'inventaire. Un symlink recréé à chaque run aligne les deux
+          # emplacements sans dupliquer le contenu ni le committer.
+          ln -sfn "$(pwd)/group_vars" "../terraform/clusters/${{ matrix.org }}/ansible-inventory/group_vars"
+
           ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/01-base.yml
           ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/02-dependencies.yml
           ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/03-cluster-init.yml
