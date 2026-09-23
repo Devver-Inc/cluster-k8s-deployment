@@ -28,6 +28,8 @@ on:
     paths:
       - "ansible/**"
       - "runner-images/ansible/**"
+      - ".github/workflows/ansible-configure-clusters.yml"
+  workflow_dispatch: {}
 
 env:
   VAULT_ADDR: ${{ vars.VAULT_ADDR }}
