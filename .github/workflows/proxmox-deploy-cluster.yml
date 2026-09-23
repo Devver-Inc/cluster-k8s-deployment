@@ -67,6 +67,24 @@ jobs:
           TF_VAR_vault_secret_id: ${{ secrets.VAULT_CI_SECRET_ID }}
         run: terraform apply -auto-approve -input=false
 
+      # local_file.ansible_inventory (module/outputs.tf) n'existe que sur le
+      # disque du runner après l'apply — sans ce commit, le workflow "3 -
+      # Ansible" ne trouve jamais l'inventaire (il tourne à partir d'un
+      # checkout frais). Committe uniquement ce fichier, jamais tout l'arbre
+      # de travail (le state/.terraform local ne doivent pas être versionnés).
+      - name: Commit generated Ansible inventory
+        working-directory: terraform/clusters/${{ inputs.org }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "ansible-inventory/inventory-${{ inputs.org }}.ini"
+          if git diff --cached --quiet; then
+            echo "Inventaire inchangé, rien à committer."
+          else
+            git commit -m "chore: update ansible inventory for ${{ inputs.org }}"
+            git push origin HEAD:main
+          fi
+
   # --- Suppression -----------------------------------------------------------
 
   destroy-infra:
