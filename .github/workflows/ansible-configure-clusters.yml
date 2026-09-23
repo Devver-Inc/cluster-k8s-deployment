@@ -136,23 +136,6 @@ jobs:
           set -euo pipefail
           source ./fetch-ssh-key.sh "${{ matrix.org }}"
 
-          # DIAGNOSTIC TEMPORAIRE — jamais le contenu de la clé, seulement sa
-          # forme (existence, taille, permissions, fingerprint) pour vérifier
-          # que le fichier écrit par fetch-ssh-key.sh est bien celui que
-          # ansible_ssh_private_key_file résout, et que la clé est valide.
-          KEY_FILE="$(pwd)/.ssh_key_${{ matrix.org }}"
-          echo "--- diagnostic clé SSH ---"
-          ls -la "$KEY_FILE" || echo "FICHIER ABSENT: $KEY_FILE"
-          echo "nb de lignes: $(wc -l < "$KEY_FILE")"
-          echo "1ère ligne (longueur + 20 premiers caractères):"
-          head -1 "$KEY_FILE" | awk '{print length, substr($0,1,20)}'
-          echo "dernière ligne (longueur + contenu):"
-          tail -1 "$KEY_FILE" | awk '{print length, $0}'
-          echo "présence de \\r littéral (od):"
-          od -c "$KEY_FILE" | grep -c '\\\\r' || echo "0"
-          ssh-keygen -lf "$KEY_FILE" || echo "ssh-keygen a échoué sur ce fichier (format invalide ?)"
-          echo "--- fin diagnostic ---"
-
           INV="../terraform/clusters/${{ matrix.org }}/ansible-inventory/inventory-${{ matrix.org }}.ini"
 
           ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" playbooks/01-base.yml

@@ -54,6 +54,17 @@ fi
 
 printf '%s\n' "${fetched_key}" > "${key_file}"
 chmod 600 "${key_file}"
+
+# Garde-fou : une clé collée dans un champ web non multi-ligne (UI Vault)
+# perd ses retours à la ligne internes et devient une seule ligne plate —
+# format toujours rejeté par SSH, mais avec un "Permission denied" qui ne
+# pointe jamais vers la vraie cause. ssh-keygen -lf valide le format sans
+# jamais afficher le contenu de la clé.
+if ! ssh-keygen -lf "${key_file}" >/dev/null 2>&1; then
+  echo "fetch-ssh-key.sh: ssh_private_key lue depuis Vault n'est pas un format de clé SSH valide (aplatie sur une seule ligne ? mal collée dans l'UI Vault ?)." >&2
+  unset fetched_key
+  return 1 2>/dev/null || true
+fi
 unset fetched_key
 
 # Nettoyage garanti à la sortie du shell (fin du run Ansible qui suit dans le
