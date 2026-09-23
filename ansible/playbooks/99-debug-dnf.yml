@@ -1,0 +1,72 @@
+---
+# DIAGNOSTIC TEMPORAIRE — isole le module dnf seul (pas tout 01-base.yml)
+# pour comprendre pourquoi "Mettre à jour tous les paquets" échoue avec
+# "SQLite error on /var/lib/dnf/history.sqlite: readonly database" via
+# Ansible alors que `sudo dnf update` marche en SSH manuel. À supprimer une
+# fois la cause trouvée.
+- name: Debug dnf module
+  hosts: all
+  gather_facts: false
+
+  tasks:
+    - name: whoami effectif
+      ansible.builtin.command: whoami
+      changed_when: false
+      register: whoami_out
+
+    - name: afficher whoami
+      ansible.builtin.debug:
+        msg: "whoami: {{ whoami_out.stdout }}"
+
+    - name: id effectif
+      ansible.builtin.command: id
+      changed_when: false
+      register: id_out
+
+    - name: afficher id
+      ansible.builtin.debug:
+        msg: "id: {{ id_out.stdout }}"
+
+    - name: permissions sur /var/lib/dnf
+      ansible.builtin.command: ls -la /var/lib/dnf/
+      changed_when: false
+      register: ls_out
+
+    - name: afficher permissions
+      ansible.builtin.debug:
+        msg: "{{ ls_out.stdout_lines }}"
+
+    - name: tenter dnf check-update via module (sans become)
+      ansible.builtin.dnf:
+        name: nano
+        state: present
+      become: false
+      ignore_errors: true
+      register: dnf_no_become
+
+    - name: résultat sans become
+      ansible.builtin.debug:
+        var: dnf_no_become
+
+    - name: tenter dnf install nano via module (avec become)
+      ansible.builtin.dnf:
+        name: nano
+        state: present
+      become: true
+      ignore_errors: true
+      register: dnf_with_become
+
+    - name: résultat avec become
+      ansible.builtin.debug:
+        var: dnf_with_become
+
+    - name: tenter dnf install nano via command brut (avec become)
+      ansible.builtin.command: dnf install -y nano
+      become: true
+      ignore_errors: true
+      register: dnf_command
+      changed_when: false
+
+    - name: résultat command brut
+      ansible.builtin.debug:
+        var: dnf_command
