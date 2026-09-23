@@ -3,7 +3,7 @@
 # ne change pas (voir .github/workflows/ansible-configure-clusters.yml, qui
 # extrait cette ligne par grep pour construire le tag de l'image).
 #
-# IMAGE_VERSION=3
+# IMAGE_VERSION=4
 #
 # Incrémenter cette version à chaque changement de ce Dockerfile ou de
 # ansible/requirements.yml, pour forcer un rebuild/push.
