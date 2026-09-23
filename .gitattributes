@@ -1,0 +1,9 @@
+# Force LF peu importe la config core.autocrlf du runner/poste qui checkoute
+# — un script shell avec des CRLF casse silencieusement (shebang, heredocs,
+# variables avec un \r invisible en fin de valeur, cf. le bug VAULT_ADDR sur
+# le job configure du workflow "3 - Ansible").
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.tf text eol=lf
+*.tpl text eol=lf
