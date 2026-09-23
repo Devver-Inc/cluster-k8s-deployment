@@ -124,11 +124,14 @@ jobs:
           secretId: ${{ secrets.VAULT_CI_SECRET_ID }}
           exportToken: true
 
-      # ansible_ssh_private_key_file (group_vars/all.yml) est résolu avant la
-      # première connexion SSH — la clé doit donc exister sur disque avant
-      # ansible-playbook (voir ansible/README.md). fetch-ssh-key.sh est
-      # sourcé pour que VAULT_TOKEN (déjà exporté par le step précédent) et le
-      # nettoyage (trap EXIT) restent dans le même shell que les 3 playbooks.
+      # ansible_ssh_private_key_file est passé explicitement en -e (chemin
+      # absolu), pas via group_vars/all.yml : {{ playbook_dir }} ne se résout
+      # pas de façon fiable pour une variable de connexion (résolue très tôt,
+      # avant la 1ère connexion SSH) — Ansible retombait silencieusement sur
+      # aucune clé (Permission denied, sans jamais signaler un chemin
+      # introuvable). fetch-ssh-key.sh est sourcé pour que VAULT_TOKEN (déjà
+      # exporté par le step précédent) et le nettoyage (trap EXIT) restent
+      # dans le même shell que les 3 playbooks.
       - name: Run Ansible playbooks
         working-directory: ansible
         shell: bash
@@ -137,21 +140,8 @@ jobs:
           source ./fetch-ssh-key.sh "${{ matrix.org }}"
 
           INV="../terraform/clusters/${{ matrix.org }}/ansible-inventory/inventory-${{ matrix.org }}.ini"
-
-          # DIAGNOSTIC TEMPORAIRE — vérifie juste l'EXISTENCE et la TAILLE du
-          # fichier (jamais son contenu) au moment précis où Ansible en aurait
-          # besoin, sans passer par aucun lookup Vault ni connexion SSH.
           KEY_PATH="$(pwd)/.ssh_key_${{ matrix.org }}"
-          echo "chemin attendu par ansible_ssh_private_key_file: playbooks/../.ssh_key_${{ matrix.org }} -> $(cd playbooks/.. && pwd)/.ssh_key_${{ matrix.org }}"
-          ls -la "$KEY_PATH" || echo "ABSENT à cet instant: $KEY_PATH"
 
-          # DIAGNOSTIC TEMPORAIRE 2 — contourne group_vars/all.yml et force
-          # explicitement -e ansible_ssh_private_key_file=<chemin absolu>,
-          # priorité maximale en Ansible. Si ça marche avec -e mais pas via
-          # group_vars, le souci est dans la résolution Jinja de la variable
-          # (ex: playbook_dir non défini dans ce contexte), pas dans la clé
-          # elle-même.
-          ansible-playbook -vvv -i "$INV" -e cluster_org="${{ matrix.org }}" \
-            -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/01-base.yml
-          ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" playbooks/02-dependencies.yml
-          ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" playbooks/03-cluster-init.yml
+          ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/01-base.yml
+          ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/02-dependencies.yml
+          ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/03-cluster-init.yml

@@ -33,21 +33,26 @@ export VAULT_SECRET_ID='...'
 
 ## Lancer un déploiement complet
 
-`ansible_ssh_private_key_file` (`group_vars/all.yml`) est résolu **avant** la
-première connexion SSH — aucune tâche d'un playbook ne peut donc écrire cette
-clé à temps. `fetch-ssh-key.sh` la récupère depuis Vault et l'écrit dans un
+`fetch-ssh-key.sh` récupère `ssh_private_key` depuis Vault et l'écrit dans un
 fichier temporaire local, **toujours supprimé en sortie de shell** (`trap
-EXIT`), à sourcer avant chaque run :
+EXIT`), à sourcer avant chaque run. Le chemin de ce fichier est ensuite passé
+explicitement à chaque `ansible-playbook` via `-e
+ansible_ssh_private_key_file=...` — **pas** défini dans `group_vars/all.yml` :
+`{{ playbook_dir }}` ne s'est pas révélé fiable pour une variable de connexion
+(résolue avant la 1ère connexion SSH), Ansible retombait alors silencieusement
+sur aucune clé (`Permission denied` sans jamais signaler de chemin
+introuvable) :
 
 ```bash
 cd ansible
 INV=../terraform/clusters/<org>/ansible-inventory/inventory-<org>.ini
 
 source ./fetch-ssh-key.sh <org>
+KEY_PATH="$(pwd)/.ssh_key_<org>"
 
-ansible-playbook -i "$INV" -e cluster_org=<org> playbooks/01-base.yml
-ansible-playbook -i "$INV" -e cluster_org=<org> playbooks/02-dependencies.yml
-ansible-playbook -i "$INV" -e cluster_org=<org> playbooks/03-cluster-init.yml
+ansible-playbook -i "$INV" -e cluster_org=<org> -e ansible_ssh_private_key_file="$KEY_PATH" playbooks/01-base.yml
+ansible-playbook -i "$INV" -e cluster_org=<org> -e ansible_ssh_private_key_file="$KEY_PATH" playbooks/02-dependencies.yml
+ansible-playbook -i "$INV" -e cluster_org=<org> -e ansible_ssh_private_key_file="$KEY_PATH" playbooks/03-cluster-init.yml
 ```
 
 ## Ce que fait chaque playbook
