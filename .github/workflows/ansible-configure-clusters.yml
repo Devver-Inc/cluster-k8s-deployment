@@ -92,7 +92,7 @@ jobs:
 
   configure:
     needs: [build-image, list-clusters]
-    if: needs.list-clusters.outputs.orgs != '[]'
+    if: needs.list-clusters.outputs.orgs != '' && needs.list-clusters.outputs.orgs != '[]'
     runs-on: self-hosted
     container:
       image: ${{ needs.build-image.outputs.image }}
@@ -101,8 +101,11 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     strategy:
       fail-fast: false
+      # strategy est évalué avant que le if: du job ne puisse le sauter — un
+      # orgs vide (ex: list-clusters en échec) ferait planter fromJson('') ici
+      # même si le job entier va être skip, d'où le fallback explicite '[]'.
       matrix:
-        org: ${{ fromJson(needs.list-clusters.outputs.orgs) }}
+        org: ${{ fromJson(needs.list-clusters.outputs.orgs || '[]') }}
     steps:
       - uses: actions/checkout@v4
 
