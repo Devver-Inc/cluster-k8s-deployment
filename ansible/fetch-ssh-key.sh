@@ -22,12 +22,14 @@ org="${1:?Usage: source fetch-ssh-key.sh <org>}"
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 key_file="${script_dir}/.ssh_key_${org}"
 
-# VAULT_ADDR (vars.VAULT_ADDR côté GitHub Actions) peut arriver avec un \r
-# de fin de ligne selon la façon dont la variable a été saisie/injectée — le
-# CLI vault (contrairement à hashicorp/vault-action) ne le tolère pas
-# ("invalid control character in URL"), d'où le nettoyage explicite.
+# VAULT_ADDR (vars.VAULT_ADDR côté GitHub Actions) peut arriver avec un \r\n
+# de fin de ligne selon la façon dont la variable est injectée dans le
+# process — le CLI vault (contrairement à hashicorp/vault-action) ne le
+# tolère pas ("invalid control character in URL"). tr -d retire TOUT \r et
+# \n, pas seulement le dernier caractère (un simple "%$'\r'" ne suffit pas
+# quand \r et \n sont deux caractères distincts en fin de valeur).
 export VAULT_ADDR="${VAULT_ADDR:-https://vault.devver.app}"
-VAULT_ADDR="${VAULT_ADDR%$'\r'}"
+VAULT_ADDR="$(printf '%s' "${VAULT_ADDR}" | tr -d '\r\n')"
 export VAULT_ADDR
 
 if [[ -z "${VAULT_TOKEN:-}" ]]; then
