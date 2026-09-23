@@ -40,7 +40,11 @@ cluster_secrets: "{{ lookup('community.hashi_vault.vault_kv2_get',
 ansible_user: "{{ cluster_secrets.vm_user }}"
 # Écrit par fetch-ssh-key.sh AVANT de lancer ansible-playbook — ce champ est
 # résolu avant la première connexion SSH, donc aucune tâche Ansible ne peut
-# l'écrire à temps (voir ansible/README.md).
-ansible_ssh_private_key_file: "{{ playbook_dir }}/.ssh_key_{{ cluster_org }}"
+# l'écrire à temps (voir ansible/README.md). Le script écrit dans son propre
+# dossier (ansible/, pas ansible/playbooks/) — playbook_dir pointerait vers
+# playbooks/ et ne trouverait jamais le fichier (mismatch silencieux : sans
+# clé valide, Ansible retombe sur l'agent SSH ambiant, d'où un
+# "Permission denied" au lieu d'une erreur "fichier introuvable" explicite).
+ansible_ssh_private_key_file: "{{ playbook_dir }}/../.ssh_key_{{ cluster_org }}"
 ansible_become: true
 ansible_become_password: "{{ cluster_secrets.vm_password }}"
