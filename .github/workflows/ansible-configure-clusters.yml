@@ -47,7 +47,10 @@ jobs:
       - id: tag
         run: |
           version="$(grep -oP '^# IMAGE_VERSION=\K.+' runner-images/ansible/Dockerfile)"
-          echo "image=${IMAGE_NAME}:${version}" >> "$GITHUB_OUTPUT"
+          # GHCR exige un nom de repository en minuscules — github.repository
+          # garde la casse réelle de l'owner/repo GitHub (ex: Devver-Inc).
+          image_name="${IMAGE_NAME,,}"
+          echo "image=${image_name}:${version}" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
