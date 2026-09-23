@@ -131,6 +131,7 @@ jobs:
       # nettoyage (trap EXIT) restent dans le même shell que les 3 playbooks.
       - name: Run Ansible playbooks
         working-directory: ansible
+        shell: bash
         run: |
           set -euo pipefail
           source ./fetch-ssh-key.sh "${{ matrix.org }}"
