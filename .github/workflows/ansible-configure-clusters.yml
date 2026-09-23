@@ -142,6 +142,12 @@ jobs:
           INV="../terraform/clusters/${{ matrix.org }}/ansible-inventory/inventory-${{ matrix.org }}.ini"
           KEY_PATH="$(pwd)/.ssh_key_${{ matrix.org }}"
 
+          # DIAGNOSTIC TEMPORAIRE — ansible-inventory ne se connecte jamais,
+          # pas de lookup Vault déclenché, montre précisément quelles
+          # group_vars sont attachées à chaque hôte.
+          echo "pwd: $(pwd)"
+          ansible-inventory -i "$INV" --graph --vars 2>&1 | head -60
+
           ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/01-base.yml
           ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/02-dependencies.yml
           ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/03-cluster-init.yml
