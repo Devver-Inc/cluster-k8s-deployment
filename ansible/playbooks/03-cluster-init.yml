@@ -14,6 +14,9 @@
 - name: Initialiser le premier master RKE2
   hosts: server[0]
   gather_facts: false
+  # become au niveau du play — ansible_become: true seul dans
+  # group_vars/all.yml ne s'applique pas de façon fiable (voir 01-base.yml).
+  become: true
 
   tasks:
     - name: Créer /etc/rancher/rke2/
@@ -59,6 +62,7 @@
 - name: Joindre les masters supplémentaires
   hosts: server:!server[0]
   gather_facts: false
+  become: true
   vars:
     rke2_join_token: "{{ hostvars[groups['server'][0]]['rke2_join_token'] }}"
 
@@ -88,6 +92,7 @@
 - name: Joindre les workers (agents)
   hosts: agent
   gather_facts: false
+  become: true
   vars:
     rke2_join_token: "{{ hostvars[groups['server'][0]]['rke2_join_token'] }}"
 
@@ -116,6 +121,8 @@
 - name: Récupérer le kubeconfig et le token, les écrire dans Vault
   hosts: server[0]
   gather_facts: false
+  # become requis pour lire /etc/rancher/rke2/rke2.yaml (0600 par défaut).
+  become: true
 
   tasks:
     - name: Attendre que tous les noeuds aient rejoint (kubelet up)

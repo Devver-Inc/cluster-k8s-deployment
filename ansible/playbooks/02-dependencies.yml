@@ -9,6 +9,9 @@
 - name: Dépendances + installation RKE2
   hosts: all
   gather_facts: true
+  # become au niveau du play — ansible_become: true seul dans
+  # group_vars/all.yml ne s'applique pas de façon fiable (voir 01-base.yml).
+  become: true
 
   tasks:
     - name: Installer nfs-utils (client NFS, requis par la storage class nfs.csi.k8s.io)

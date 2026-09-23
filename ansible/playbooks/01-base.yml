@@ -8,6 +8,12 @@
 - name: Préparation système de base (RKE2 prérequis)
   hosts: all
   gather_facts: true
+  # become au niveau du play (pas seulement ansible_become: true dans
+  # group_vars/all.yml, qui s'est révélé peu fiable dans ce contexte — mêmes
+  # symptômes que le bug playbook_dir sur ansible_ssh_private_key_file :
+  # échec silencieux, ex. "readonly database"/"not writable" sans jamais
+  # signaler un problème de privilèges).
+  become: true
 
   tasks:
     - name: Mettre à jour tous les paquets
@@ -15,7 +21,6 @@
         name: "*"
         state: latest
         update_cache: true
-      become: true
 
     - name: Configurer les serveurs DNS
       ansible.builtin.copy:

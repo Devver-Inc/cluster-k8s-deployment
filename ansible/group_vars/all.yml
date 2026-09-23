@@ -48,5 +48,10 @@ ansible_user: "{{ cluster_secrets.vm_user }}"
 # (voir .github/workflows/ansible-configure-clusters.yml) et par
 # ansible/README.md pour un run manuel — cohérent avec fetch-ssh-key.sh qui
 # écrit ce même fichier juste avant.
-ansible_become: true
+# become: true est défini au niveau de chaque play dans les playbooks
+# (pas ici) — ansible_become: true seul dans group_vars ne s'est pas révélé
+# fiable dans ce contexte (comportement identique au bug ansible_ssh_private_key_file
+# ci-dessus : become échouait silencieusement, tâches exécutées en tant
+# qu'utilisateur non-root sans jamais signaler d'erreur de privilèges — ex.
+# "SQLite ... readonly database" sur dnf, "Destination /etc not writable").
 ansible_become_password: "{{ cluster_secrets.vm_password }}"
