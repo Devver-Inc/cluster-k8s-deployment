@@ -135,6 +135,18 @@ jobs:
       - name: Run Ansible playbooks
         working-directory: ansible
         shell: bash
+        # community.hashi_vault.vault_kv2_get (group_vars/all.yml) fait son
+        # propre login AppRole via lookup('env', 'VAULT_ROLE_ID'/'VAULT_SECRET_ID')
+        # — le step précédent (hashicorp/vault-action) ne les exporte jamais
+        # dans l'environnement shell (il consomme les secrets directement via
+        # roleId:/secretId:, n'exporte que VAULT_TOKEN). Sans cet export, le
+        # lookup envoyait un login avec role_id="" / secret_id="", que Vault
+        # rejetait avec "failed to determine alias name from login request"
+        # (message trompeur, sans trace utile côté serveur). Même pattern que
+        # TF_VAR_vault_role_id dans proxmox-deploy-cluster.yml.
+        env:
+          VAULT_ROLE_ID: ${{ secrets.VAULT_CI_ROLE_ID }}
+          VAULT_SECRET_ID: ${{ secrets.VAULT_CI_SECRET_ID }}
         run: |
           set -euo pipefail
           source ./fetch-ssh-key.sh "${{ matrix.org }}"
