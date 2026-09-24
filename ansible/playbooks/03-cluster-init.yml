@@ -81,7 +81,7 @@
           token: "{{ rke2_join_token }}"
           write-kubeconfig-mode: "0640"
         mode: "0644"
-        no_log: true
+      no_log: true
 
     - name: Démarrer et activer rke2-server
       ansible.builtin.systemd:
@@ -110,7 +110,7 @@
           server: "https://{{ rke2_first_server_ip }}:9345"
           token: "{{ rke2_join_token }}"
         mode: "0644"
-        no_log: true
+      no_log: true
 
     - name: Démarrer et activer rke2-agent
       ansible.builtin.systemd:
