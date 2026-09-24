@@ -149,7 +149,14 @@
         cluster_secrets_updated: "{{ cluster_secrets | combine({'kubeconfig': rke2_kubeconfig_final, 'rke2_token': rke2_join_token}) }}"
       no_log: true
 
+    # delegate_to: localhost — ce module (contrairement au lookup vault_kv2_get
+    # utilisé dans group_vars/all.yml, toujours exécuté côté contrôleur) est
+    # une tâche Ansible classique, exécutée par défaut sur l'hôte cible
+    # (master-1, une VM Rocky Linux sans hvac installé — "Failed to import
+    # the required Python library (hvac)"). Le contrôleur (conteneur CI) a
+    # hvac, donc c'est là qu'il faut exécuter cette tâche.
     - name: Écrire kubeconfig + token dans Vault (sans écraser les champs existants)
+      delegate_to: localhost
       community.hashi_vault.vault_kv2_write:
         url: "{{ vault_addr }}"
         auth_method: "{{ vault_auth_method }}"
@@ -160,20 +167,6 @@
         path: "{{ vault_cluster_secret_path }}"
         data: "{{ cluster_secrets_updated }}"
       no_log: true
-      register: vault_write_result
-      ignore_errors: true
-
-    # DIAGNOSTIC TEMPORAIRE — affiche uniquement le message d'erreur (jamais
-    # data/cluster_secrets_updated) pour comprendre l'échec de l'écriture Vault.
-    - name: Afficher l'erreur d'écriture Vault (sans exposer les secrets)
-      ansible.builtin.debug:
-        msg: "{{ vault_write_result.msg | default('pas de champ msg') }}"
-      when: vault_write_result is failed
-
-    - name: Échouer si l'écriture Vault a échoué
-      ansible.builtin.fail:
-        msg: "Écriture Vault échouée, voir le message ci-dessus."
-      when: vault_write_result is failed
 
     - name: Cluster RKE2 initialisé
       ansible.builtin.debug:
