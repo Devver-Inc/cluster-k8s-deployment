@@ -160,6 +160,20 @@
         path: "{{ vault_cluster_secret_path }}"
         data: "{{ cluster_secrets_updated }}"
       no_log: true
+      register: vault_write_result
+      ignore_errors: true
+
+    # DIAGNOSTIC TEMPORAIRE — affiche uniquement le message d'erreur (jamais
+    # data/cluster_secrets_updated) pour comprendre l'échec de l'écriture Vault.
+    - name: Afficher l'erreur d'écriture Vault (sans exposer les secrets)
+      ansible.builtin.debug:
+        msg: "{{ vault_write_result.msg | default('pas de champ msg') }}"
+      when: vault_write_result is failed
+
+    - name: Échouer si l'écriture Vault a échoué
+      ansible.builtin.fail:
+        msg: "Écriture Vault échouée, voir le message ci-dessus."
+      when: vault_write_result is failed
 
     - name: Cluster RKE2 initialisé
       ansible.builtin.debug:
