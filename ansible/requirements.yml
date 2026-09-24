@@ -1,6 +1,13 @@
 ---
+# Versions épinglées strictement (pas de ">=") — une contrainte ouverte a
+# déjà causé un bug de version (ansible-core~=2.17 résolvait vers 2.21.4,
+# une version très récente avec un bug de découverte des group_vars par
+# groupe). Incrémenter explicitement ici + IMAGE_VERSION dans le Dockerfile
+# pour changer de version en connaissance de cause.
 collections:
   - name: community.hashi_vault
-    version: ">=6.0.0"
+    version: "6.2.0"
   - name: ansible.posix
+    version: "1.5.4"
   - name: community.general
+    version: "9.5.0"

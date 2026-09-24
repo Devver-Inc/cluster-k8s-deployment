@@ -3,7 +3,7 @@
 # ne change pas (voir .github/workflows/ansible-configure-clusters.yml, qui
 # extrait cette ligne par grep pour construire le tag de l'image).
 #
-# IMAGE_VERSION=7
+# IMAGE_VERSION=8
 #
 # Incrémenter cette version à chaque changement de ce Dockerfile ou de
 # ansible/requirements.yml, pour forcer un rebuild/push.
@@ -37,9 +37,12 @@ RUN apt-get update \
 # chargeait mais pas group_vars/server.yml ni agent.yml malgré une
 # appartenance de groupe correcte (group_names confirmé correct). 2.17.6 est
 # une version stable connue sans ce problème.
+# hvac pinné aussi : non pinné auparavant, installait la dernière version
+# disponible au build — même risque que ansible-core~=2.17 (résolution vers
+# une version imprévue). 2.3.0 est une version stable largement utilisée.
 RUN pip install --no-cache-dir \
         ansible-core==2.17.6 \
-        hvac
+        hvac==2.3.0
 
 # Chemin explicite et fixe (indépendant de $HOME, qui peut différer entre le
 # build de l'image et le runtime du job GitHub Actions container: — le
