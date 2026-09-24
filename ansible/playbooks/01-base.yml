@@ -14,6 +14,13 @@
   # échec silencieux, ex. "readonly database"/"not writable" sans jamais
   # signaler un problème de privilèges).
   become: true
+  # DIAGNOSTIC TEMPORAIRE — chaque hôte fait son propre login Vault
+  # (cluster_secrets, group_vars/all.yml) dès Gathering Facts ; en parallèle
+  # (comportement par défaut), plusieurs logins simultanés pour le même
+  # role_id semblent produire "failed to determine alias name from login
+  # request" côté Vault (erreur liée au système d'identité/entity). serial: 1
+  # force un hôte à la fois, pour confirmer si la concurrence est la cause.
+  serial: 1
 
   tasks:
     - name: Mettre à jour tous les paquets
