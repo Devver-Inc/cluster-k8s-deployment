@@ -131,3 +131,9 @@ variable "ssh_public_key" {
   type        = string
   sensitive   = true
 }
+
+variable "vm_password" {
+  description = "Mot de passe cloud-init de l'utilisateur VM (depuis Vault) — permet une connexion en console Proxmox si besoin, en plus de SSH par clé."
+  type        = string
+  sensitive   = true
+}

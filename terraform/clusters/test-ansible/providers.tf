@@ -62,6 +62,7 @@ module "cluster" {
 
   vm_user        = data.vault_kv_secret_v2.cluster_secrets.data["vm_user"]
   ssh_public_key = data.vault_kv_secret_v2.cluster_secrets.data["ssh_public_key"]
+  vm_password    = data.vault_kv_secret_v2.cluster_secrets.data["vm_password"]
 }
 
 output "cluster_nodes" {

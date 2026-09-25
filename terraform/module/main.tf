@@ -62,6 +62,7 @@ resource "proxmox_virtual_environment_vm" "mixed" {
     user_account {
       username = var.vm_user
       keys     = [var.ssh_public_key]
+      password = var.vm_password
     }
   }
 
@@ -137,6 +138,7 @@ resource "proxmox_virtual_environment_vm" "worker_only" {
     user_account {
       username = var.vm_user
       keys     = [var.ssh_public_key]
+      password = var.vm_password
     }
   }
 
