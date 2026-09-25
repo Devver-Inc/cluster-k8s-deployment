@@ -7,7 +7,7 @@
 
 org                      = "test-ansible"
 node_count               = 3 # minimum 3 (masters+workers)
-additional_workers_count = 0
+additional_workers_count = 1
 tags                     = ["devver", "test-ansible"]
 
 proxmox_node  = "PROXMOX-PVE1"
