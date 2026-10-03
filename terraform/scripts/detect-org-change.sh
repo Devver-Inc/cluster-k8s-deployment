@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Détecte si une org présente dans le repo (terraform/clusters/<org>/) n'a pas
-# encore de structure Vault — utilisé par le job "detect" de vault-create-org.yml
-# pour savoir s'il doit préparer la structure Vault d'une nouvelle org.
+# Détecte les orgs présentes dans le repo (terraform/clusters/<org>/) qui
+# n'ont pas encore de structure Vault — utilisé par le job "detect" de
+# vault-create-org.yml pour savoir lesquelles préparer automatiquement.
 #
 # Compare un ÉTAT (dossiers clusters/<org>/ existants) à un AUTRE ÉTAT (orgs
 # déjà connues de Vault), plutôt qu'un diff entre deux commits git — ce
@@ -11,19 +11,21 @@
 # diff du push suivant ne montrait plus cet ajout. La comparaison d'état
 # donne toujours le bon résultat, peu importe l'historique.
 #
-# Ne détecte QUE les créations : la suppression d'un cluster ne passe pas par
-# ce script — elle se pilote directement via workflow_dispatch sur
-# proxmox-deploy-cluster.yml, qui retire lui-même le dossier une fois le
-# destroy infra confirmé réussi.
+# Ne détecte QUE les créations : la suppression d'un cluster se pilote par
+# detect-cluster-change.sh (proxmox-deploy-cluster.yml), pas ici.
+#
+# Plusieurs orgs peuvent être retournées en une fois — le job vault-create
+# qui consomme cette sortie les traite chacune en matrix, et chaque apply
+# n'AJOUTE que l'org concernée à l'état réel de Vault (jamais de recalcul
+# global), donc aucun risque à en traiter plusieurs dans le même run.
 #
 # Prérequis : CLI `vault` installé, VAULT_ADDR + VAULT_TOKEN déjà exportés
 # (ex: via hashicorp/vault-action avec exportToken: true), jq installé.
 #
 # Usage : ./detect-org-change.sh
 # Sortie ($GITHUB_OUTPUT si dispo, sinon stdout) :
-#   - une org à créer trouvée : org=<nom>  action=create
-#   - aucune org à créer      : action=none  (pas une erreur — cas normal)
-# Échoue explicitement si PLUSIEURS orgs sont à créer en même temps (une à la fois).
+#   orgs=<JSON> — liste d'orgs sans structure Vault, ex: ["prod","staging"]
+#   Liste vide [] si repo et Vault déjà synchronisés (cas normal, pas une erreur).
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
@@ -32,27 +34,17 @@ repo_orgs=$(bash "${script_dir}/list-orgs.sh" | jq -r '.[]' | sort)
 vault_orgs=$(bash "${script_dir}/list-vault-orgs.sh" | sort)
 
 to_create=$(comm -23 <(printf '%s\n' "${repo_orgs}") <(printf '%s\n' "${vault_orgs}") | grep -v '^$' || true)
-create_count=$(printf '%s\n' "${to_create}" | grep -c . || true)
 
-if [[ "${create_count}" -eq 0 ]]; then
-  org=""
-  action="none"
+if [[ -z "${to_create}" ]]; then
+  orgs="[]"
   echo "detect-org-change.sh: aucune org à créer (repo et Vault déjà synchronisés)." >&2
-elif [[ "${create_count}" -eq 1 ]]; then
-  org="${to_create}"
-  action="create"
-  echo "detect-org-change.sh: org=${org} action=${action}" >&2
 else
-  echo "detect-org-change.sh: plusieurs orgs à créer détectées en une fois [${to_create}] — les traiter une par une." >&2
-  exit 1
+  orgs=$(printf '%s\n' "${to_create}" | jq -R . | jq -s -c .)
+  echo "detect-org-change.sh: orgs à créer détectées : ${orgs}" >&2
 fi
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-  {
-    echo "org=${org}"
-    echo "action=${action}"
-  } >> "${GITHUB_OUTPUT}"
+  echo "orgs=${orgs}" >> "${GITHUB_OUTPUT}"
 else
-  echo "org=${org}"
-  echo "action=${action}"
+  echo "orgs=${orgs}"
 fi

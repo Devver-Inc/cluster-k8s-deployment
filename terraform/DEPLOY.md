@@ -144,33 +144,37 @@ terraform destroy
 
 ## Via la pipeline CI
 
-Deux workflows, découpés en deux fichiers **parce que GitHub ne propose pas
-de pause/validation manuelle native (Environments + required reviewers) sur
-un repo privé en plan Free** — un second déclenchement manuel joue ce rôle à
-la place, gratuitement sur tout plan :
+Deux workflows, tous deux pilotés par **push** — l'admin modifie le code
+(crée/supprime un dossier `terraform/clusters/<org>/`, change
+`additional_workers_count`) et pousse, le pipeline déduit l'action à mener :
 
 1. [`vault-create-org.yml`](../.github/workflows/vault-create-org.yml)
-   (« **1 - Vault: création structure org** » dans l'onglet Actions) — deux
-   triggers distincts :
-   - Sur push touchant `terraform/clusters/` : job `detect` **informatif
-     uniquement** — signale dans le résumé du run si une org du repo n'a pas
-     encore de structure Vault, mais ne crée jamais rien automatiquement (un
-     apply automatique qui recalculerait la liste `orgs` depuis un checkout
-     potentiellement incomplet risquerait de **supprimer** une org existante
-     absente de ce checkout — ça a réellement failli arriver).
-   - `workflow_dispatch` (**Actions > 1 - Vault: création structure org >
-     Run workflow**, input `org`) : crée réellement la structure Vault de
-     l'org donnée, en lisant l'état **réel** de Vault et en y **ajoutant**
-     uniquement cette org — les autres orgs déjà présentes ne sont jamais
-     touchées, quel que soit l'état du repo checkouté.
+   (« **1 - Vault: création structure org** » dans l'onglet Actions) — sur
+   push touchant `terraform/clusters/**` : le job `detect` compare l'état du
+   repo à l'état **réel** de Vault, et le job `vault-create` crée
+   automatiquement la structure Vault de toute org présente dans le repo
+   mais pas encore dans Vault — en **ajoutant** uniquement ces orgs à l'état
+   réel de Vault, jamais en recalculant la liste complète depuis un scan du
+   repo (ça a réellement failli supprimer la structure Vault de `prod` avec
+   l'ancien mécanisme — éliminé structurellement ici, aucune org déjà connue
+   de Vault ne peut disparaître via ce chemin). `workflow_dispatch` (input
+   `org`) reste disponible pour une création ponctuelle manuelle (ex: rejouer
+   après un échec), mais n'est plus le chemin principal.
 2. [`proxmox-deploy-cluster.yml`](../.github/workflows/proxmox-deploy-cluster.yml)
    (« **2 - Proxmox: apply/destroy cluster** » dans l'onglet Actions) —
-   déclenché **automatiquement par push** sur `terraform/clusters/**` (plus
-   de `workflow_dispatch` manuel pour ce workflow). Un job `detect` compare
-   l'état du repo avant/après le push (dossiers apparus/disparus,
-   `additional_workers_count` changé dans `values.auto.tfvars`) pour en
-   déduire l'une de 4 actions, chacune son propre job : `create-cluster`,
-   `delete-cluster`, `add-worker`, `remove-worker` (voir détail plus bas).
+   déclenché **automatiquement par push** sur `terraform/clusters/**`. Un job
+   `detect` compare l'état du repo avant/après le push (dossiers
+   apparus/disparus, `additional_workers_count` changé dans
+   `values.auto.tfvars`) pour en déduire l'une de 4 actions, chacune son
+   propre job : `create-cluster`, `delete-cluster`, `add-worker`,
+   `remove-worker` (voir détail plus bas).
+
+La structure Vault créée automatiquement contient encore les placeholders du
+template (`vm_password=CHANGE_ME`, etc.) — `create-cluster` peut se
+déclencher dans la foulée sur le même push dès que la structure existe, mais
+échouera proprement (credentials VM invalides) tant que les vrais secrets
+n'ont pas été saisis dans Vault (Étape 2 ci-dessus). Pas de risque, juste un
+job en erreur à corriger avant de repousser un commit trivial pour relancer.
 
 Si l'org passe un jour sur un plan GitHub payant (Team/Enterprise), il devient
 possible de revenir à un unique workflow avec de vrais Environments — pas
@@ -256,15 +260,14 @@ vault write -f auth/terraform-orgs/role/terraform-ci/secret-id
 ### Ce que fait chaque workflow selon le cas
 
 **Ajout d'un dossier `clusters/<org>/`** :
-Le push déclenche `vault-create-org.yml` en mode `detect` — il ne fait que
-signaler dans son résumé que `<org>` n'a pas encore de structure Vault.
-Lancer **manuellement** ce même workflow en `workflow_dispatch` avec
-`org=<org>` → job `vault-create` (structure Vault créée pour cette org
-uniquement, sans toucher aux autres). Une fois les vrais secrets saisis dans
-Vault (Étape 2 ci-dessus), un **second push** (même vide, ou tout commit
-touchant `terraform/clusters/<org>/`) déclenche `proxmox-deploy-cluster.yml`
-→ `detect` reconnaît le dossier + la structure Vault désormais créée → job
-`create-cluster` (VMs créées).
+Le push déclenche `vault-create-org.yml` : `detect` repère que `<org>` n'a
+pas encore de structure Vault → job `vault-create` la crée automatiquement
+(uniquement pour cette org, sans toucher aux autres). Le même push déclenche
+aussi `proxmox-deploy-cluster.yml`, mais `create-cluster` échoue à ce stade
+(secrets encore à leurs placeholders `CHANGE_ME`) : saisir les vrais secrets
+dans Vault (Étape 2 ci-dessus), puis pousser un **second commit** (même
+trivial) touchant `terraform/clusters/<org>/` pour redéclencher
+`create-cluster` avec les bons secrets cette fois.
 
 **Supprimer un cluster** — supprimer `terraform/clusters/<org>/` soi-même
 (`git rm -r terraform/clusters/<org>/`) et pousser sur `main` :
