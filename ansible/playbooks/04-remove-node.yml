@@ -1,0 +1,38 @@
+---
+# Désinstalle RKE2 proprement sur un (ou plusieurs) node(s) worker, juste
+# avant que Terraform ne détruise sa/leur VM.
+#
+# DOIT toujours être lancé avec --limit ciblant précisément le(s) node(s) à
+# retirer (jamais tout l'inventaire par défaut), et toujours APRÈS un
+# "kubectl drain" réussi sur ce même node — orchestré par le job
+# remove-worker de .github/workflows/proxmox-deploy-cluster.yml, pas par ce
+# playbook lui-même (drain/delete node sont des opérations API Kubernetes
+# pures, faites en kubectl direct depuis le CI — ce playbook ne fait que la
+# partie système/SSH sur le node).
+#
+# hosts: agent (jamais server) — ce mécanisme ne gère QUE le retrait de
+# workers, jamais de masters (risque de perte de quorum etcd, hors scope,
+# cf. terraform/scripts/detect-worker-removal.sh qui fait déjà échouer le
+# pipeline en amont si un master est visé).
+#
+# Usage :
+#   ansible-playbook -i <inventaire> -e cluster_org=<org> \
+#     -e ansible_ssh_private_key_file=<key> --limit worker-3 \
+#     playbooks/04-remove-node.yml
+- name: Désinstaller RKE2 du node avant destruction de sa VM
+  hosts: agent
+  gather_facts: false
+  become: true
+
+  tasks:
+    - name: Arrêter tous les process/conteneurs RKE2 (rke2-killall.sh)
+      ansible.builtin.command: /usr/local/bin/rke2-killall.sh
+      changed_when: true
+      # Idempotent par design : tolère un script déjà absent ou un service
+      # déjà arrêté (rejouable sans jamais casser le run).
+      failed_when: false
+
+    - name: Désinstaller le binaire/service RKE2 (rke2-uninstall.sh)
+      ansible.builtin.command: /usr/local/bin/rke2-uninstall.sh
+      changed_when: true
+      failed_when: false

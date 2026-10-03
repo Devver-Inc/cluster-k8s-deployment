@@ -1,40 +1,83 @@
 name: "2 - Proxmox: apply/destroy cluster"
 
-# Déclenché manuellement, après "1 - Vault: création structure org" (voir ce workflow pour
-# le contexte) — fait office de gate de validation humaine, puisque les
-# GitHub Environments avec required reviewers ne sont pas disponibles en
-# plan Free. L'admin relit le résumé du run "1 - Vault: création structure org"
-# (org, action) et les retape ici volontairement, avant de lancer la suite.
+# Déclenché par push sur terraform/clusters/** — l'admin édite un fichier
+# (crée/supprime un dossier terraform/clusters/<org>/, ou change
+# additional_workers_count dans values.auto.tfvars) et pushe ; le job
+# "detect" déduit l'action qui en découle pour chaque org concernée :
+#   - create-cluster : nouveau dossier, structure Vault déjà créée (1 -
+#     Vault doit avoir tourné avant).
+#   - delete-cluster : dossier disparu.
+#   - add-worker     : additional_workers_count a augmenté.
+#   - remove-worker  : additional_workers_count a diminué — DRAINE et
+#     désinscrit le(s) worker(s) concerné(s) du cluster Kubernetes AVANT que
+#     Terraform ne détruise leur VM (sinon le node reste NotReady zombie
+#     indéfiniment dans kubectl get nodes — rien ne le nettoie jamais après
+#     coup).
+#
+# Avant cette refonte, le workflow était piloté par workflow_dispatch
+# (org+action=create/delete saisis à la main) et ne distinguait pas
+# scale-up/scale-down d'un worker d'une création/destruction complète de
+# cluster — aucun retrait propre de node n'existait pour le cas scale down.
+#
+# Pas de risque de destruction croisée entre orgs (contrairement à
+# terraform/vault/, un seul for_each partagé) : chaque org a son propre state
+# Terraform isolé dans terraform/clusters/<org>/.
 on:
-  workflow_dispatch:
-    inputs:
-      org:
-        description: "Organisation concernée (nom du dossier clusters/<org>/)"
-        required: true
-        type: string
-      action:
-        description: "Action à poursuivre"
-        required: true
-        type: choice
-        options: [create, delete]
+  push:
+    branches: [main]
+    paths:
+      - "terraform/clusters/**"
 
 env:
   VAULT_ADDR: ${{ vars.VAULT_ADDR }}
+  IMAGE_NAME: ghcr.io/${{ github.repository }}/ansible-runner
 
 jobs:
-  # --- Création ------------------------------------------------------------
+  # --- Détection -------------------------------------------------------------
 
-  apply-infra-create:
-    if: inputs.action == 'create'
+  detect:
     runs-on: self-hosted
+    outputs:
+      orgs_create: ${{ steps.detect.outputs.orgs_create }}
+      orgs_delete: ${{ steps.detect.outputs.orgs_delete }}
+      orgs_add_worker: ${{ steps.detect.outputs.orgs_add_worker }}
+      orgs_remove_worker: ${{ steps.detect.outputs.orgs_remove_worker }}
+    steps:
+      # fetch-depth: 0 — detect-cluster-change.sh compare le commit courant
+      # au précédent (git ls-tree / git show sur les deux SHA), un checkout
+      # superficiel n'aurait pas l'historique nécessaire.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Vault auth
+        uses: hashicorp/vault-action@v3
+        with:
+          url: ${{ vars.VAULT_ADDR }}
+          method: approle
+          path: terraform-orgs
+          roleId: ${{ secrets.VAULT_CI_ROLE_ID }}
+          secretId: ${{ secrets.VAULT_CI_SECRET_ID }}
+          exportToken: true
+
+      - id: detect
+        run: bash terraform/scripts/detect-cluster-change.sh "${{ github.event.before }}" "${{ github.sha }}"
+
+  # --- Création cluster --------------------------------------------------
+
+  create-cluster:
+    needs: detect
+    if: needs.detect.outputs.orgs_create != '[]'
+    runs-on: self-hosted
+    strategy:
+      fail-fast: false
+      matrix:
+        org: ${{ fromJson(needs.detect.outputs.orgs_create || '[]') }}
     steps:
       - uses: actions/checkout@v4
 
-      # Un seul AppRole terraform-ci pour toutes les orgs (voir terraform/README.md) :
-      # GitHub Actions ne permet pas de référencer secrets.X avec un nom
-      # construit dynamiquement, donc un role par org obligerait à modifier ce
-      # workflow à chaque ajout/suppression d'org. Le chemin Vault interrogé
-      # s'adapte dynamiquement à l'org à la place (ligne "secrets:" ci-dessous).
+      # Un seul AppRole terraform-ci pour toutes les orgs (voir terraform/README.md) —
+      # le chemin Vault interrogé s'adapte dynamiquement à l'org à la place.
       - name: Vault auth + fetch B2 credentials
         uses: hashicorp/vault-action@v3
         with:
@@ -43,25 +86,24 @@ jobs:
           path: terraform-orgs
           roleId: ${{ secrets.VAULT_CI_ROLE_ID }}
           secretId: ${{ secrets.VAULT_CI_SECRET_ID }}
-          exportToken: true # sans ça, VAULT_TOKEN n'est jamais exporté et le
-          # provider Vault de Terraform échoue en plein plan/apply/destroy.
+          exportToken: true
           secrets: |
             devver-infra-deployment/data/s3-backend key_id | AWS_ACCESS_KEY_ID ;
             devver-infra-deployment/data/s3-backend application_key | AWS_SECRET_ACCESS_KEY
 
       - name: Terraform init
-        working-directory: terraform/clusters/${{ inputs.org }}
+        working-directory: terraform/clusters/${{ matrix.org }}
         run: terraform init -backend-config=backend.hcl -input=false
 
       - name: Terraform plan
-        working-directory: terraform/clusters/${{ inputs.org }}
+        working-directory: terraform/clusters/${{ matrix.org }}
         env:
           TF_VAR_vault_role_id: ${{ secrets.VAULT_CI_ROLE_ID }}
           TF_VAR_vault_secret_id: ${{ secrets.VAULT_CI_SECRET_ID }}
         run: terraform plan -input=false
 
       - name: Terraform apply
-        working-directory: terraform/clusters/${{ inputs.org }}
+        working-directory: terraform/clusters/${{ matrix.org }}
         env:
           TF_VAR_vault_role_id: ${{ secrets.VAULT_CI_ROLE_ID }}
           TF_VAR_vault_secret_id: ${{ secrets.VAULT_CI_SECRET_ID }}
@@ -70,32 +112,31 @@ jobs:
       # local_file.ansible_inventory (module/outputs.tf) n'existe que sur le
       # disque du runner après l'apply — sans ce commit, le workflow "3 -
       # Ansible" ne trouve jamais l'inventaire (il tourne à partir d'un
-      # checkout frais). Committe uniquement ce fichier, jamais tout l'arbre
-      # de travail (le state/.terraform local ne doivent pas être versionnés).
+      # checkout frais).
       - name: Commit generated Ansible inventory
-        working-directory: terraform/clusters/${{ inputs.org }}
+        working-directory: terraform/clusters/${{ matrix.org }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add "ansible-inventory/inventory-${{ inputs.org }}.ini"
+          git add "ansible-inventory/inventory-${{ matrix.org }}.ini"
           if git diff --cached --quiet; then
             echo "Inventaire inchangé, rien à committer."
           else
-            git commit -m "chore: update ansible inventory for ${{ inputs.org }}"
+            git commit -m "chore: update ansible inventory for ${{ matrix.org }}"
             git push origin HEAD:main
           fi
 
-  # --- Suppression -----------------------------------------------------------
+  # --- Ajout de worker ---------------------------------------------------
 
-  destroy-infra:
-    if: inputs.action == 'delete'
+  add-worker:
+    needs: detect
+    if: needs.detect.outputs.orgs_add_worker != '[]'
     runs-on: self-hosted
+    strategy:
+      fail-fast: false
+      matrix:
+        org: ${{ fromJson(needs.detect.outputs.orgs_add_worker || '[]') }}
     steps:
-      # L'admin ne supprime jamais lui-même clusters/<org>/ — il déclenche ce
-      # workflow directement, dossier encore présent. Un simple checkout du
-      # commit courant suffit donc : plus besoin de retrouver un commit de
-      # suppression dans l'historique (fragile, cf. commentaire du step
-      # "Remove cluster folder and push" plus bas).
       - uses: actions/checkout@v4
 
       - name: Vault auth + fetch B2 credentials
@@ -106,41 +147,96 @@ jobs:
           path: terraform-orgs
           roleId: ${{ secrets.VAULT_CI_ROLE_ID }}
           secretId: ${{ secrets.VAULT_CI_SECRET_ID }}
-          exportToken: true # sans ça, VAULT_TOKEN n'est jamais exporté et le
-          # provider Vault de Terraform échoue en plein plan/apply/destroy.
+          exportToken: true
           secrets: |
             devver-infra-deployment/data/s3-backend key_id | AWS_ACCESS_KEY_ID ;
             devver-infra-deployment/data/s3-backend application_key | AWS_SECRET_ACCESS_KEY
 
       - name: Terraform init
-        working-directory: terraform/clusters/${{ inputs.org }}
+        working-directory: terraform/clusters/${{ matrix.org }}
         run: terraform init -backend-config=backend.hcl -input=false
 
-      - name: Terraform destroy
-        working-directory: terraform/clusters/${{ inputs.org }}
+      # for_each sur worker_only_nodes (locals.tf) ajoute juste la nouvelle
+      # VM pour la clé worker-N suivante — aucune autre ressource touchée.
+      - name: Terraform apply
+        working-directory: terraform/clusters/${{ matrix.org }}
         env:
           TF_VAR_vault_role_id: ${{ secrets.VAULT_CI_ROLE_ID }}
           TF_VAR_vault_secret_id: ${{ secrets.VAULT_CI_SECRET_ID }}
-        run: terraform destroy -auto-approve -input=false
+        run: terraform apply -auto-approve -input=false
 
-      # Le destroy a réussi : c'est maintenant la pipeline elle-même qui
-      # retire le dossier (pas l'admin) et pousse ce commit sur main — plus
-      # de dépendance à un diff de commits précis pour retrouver le code
-      # Terraform d'une org disparue. Ce commit redéclenchera
-      # "1 - Vault: création structure org" (même trigger paths), qui se
-      # terminera en action=none puisqu'aucune org n'y est ajoutée.
-      - name: Remove cluster folder and push
+      - name: Commit generated Ansible inventory
+        working-directory: terraform/clusters/${{ matrix.org }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git rm -r "terraform/clusters/${{ inputs.org }}"
-          git commit -m "chore: remove clusters/${{ inputs.org }} after destroy"
-          git push origin HEAD:main
+          git add "ansible-inventory/inventory-${{ matrix.org }}.ini"
+          if git diff --cached --quiet; then
+            echo "Inventaire inchangé, rien à committer."
+          else
+            git commit -m "chore: update ansible inventory for ${{ matrix.org }}"
+            git push origin HEAD:main
+          fi
 
-  vault-cleanup:
-    needs: destroy-infra
-    if: inputs.action == 'delete'
+  # --- Retrait de worker (drain + désinscription AVANT destruction VM) ---
+
+  remove-worker-build-image:
+    needs: detect
+    if: needs.detect.outputs.orgs_remove_worker != '[]'
     runs-on: self-hosted
+    permissions:
+      packages: write
+      contents: read
+    outputs:
+      image: ${{ steps.tag.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: tag
+        run: |
+          version="$(grep -oP '^# IMAGE_VERSION=\K.+' runner-images/ansible/Dockerfile)"
+          # GHCR exige un nom de repository en minuscules — github.repository
+          # garde la casse réelle de l'owner/repo GitHub (ex: Devver-Inc).
+          image_name="${IMAGE_NAME,,}"
+          echo "image=${image_name}:${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Réutilise l'image si elle existe déjà sur GHCR pour cette version —
+      # rebuild uniquement quand IMAGE_VERSION du Dockerfile a été incrémentée.
+      - name: Build & push Ansible runner image (si absente pour cette version)
+        run: |
+          set -euo pipefail
+          IMAGE="${{ steps.tag.outputs.image }}"
+          if docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
+            echo "Image $IMAGE déjà présente sur GHCR, build sauté."
+          else
+            docker build -f runner-images/ansible/Dockerfile -t "$IMAGE" .
+            docker push "$IMAGE"
+          fi
+
+  remove-worker:
+    needs: [detect, remove-worker-build-image]
+    if: needs.detect.outputs.orgs_remove_worker != '[]'
+    runs-on: self-hosted
+    # Tout le job tourne dans le conteneur Docker Ansible (kubectl + vault +
+    # ansible-playbook au même endroit), même pattern que le job "configure"
+    # de ansible-configure-clusters.yml — le login Vault (step suivant) y
+    # tourne aussi, le token n'est jamais exposé à plat sur le runner.
+    container:
+      image: ${{ needs.remove-worker-build-image.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    strategy:
+      fail-fast: false
+      matrix:
+        org: ${{ fromJson(needs.detect.outputs.orgs_remove_worker || '[]') }}
     steps:
       - uses: actions/checkout@v4
 
@@ -152,21 +248,170 @@ jobs:
           path: terraform-orgs
           roleId: ${{ secrets.VAULT_CI_ROLE_ID }}
           secretId: ${{ secrets.VAULT_CI_SECRET_ID }}
-          exportToken: true # sans ça, VAULT_TOKEN n'est jamais exporté et le
-          # provider Vault de Terraform échoue en plein plan/apply/destroy.
+          exportToken: true
           secrets: |
             devver-infra-deployment/data/s3-backend key_id | AWS_ACCESS_KEY_ID ;
             devver-infra-deployment/data/s3-backend application_key | AWS_SECRET_ACCESS_KEY
 
-      # État RÉEL de Vault (pas un scan du repo, cf. terraform/README.md) —
-      # ne retire QUE l'org explicitement ciblée par ce run (inputs.org, dont
-      # l'infra vient d'être détruite juste avant). Toute autre org présente
-      # dans Vault reste dans la liste appliquée, donc jamais affectée, même
-      # si le checkout du repo est incomplet ou désynchronisé.
+      - name: Terraform init
+        working-directory: terraform/clusters/${{ matrix.org }}
+        run: terraform init -backend-config=backend.hcl -input=false
+
+      # Échoue net (exit 1) si le plan révèle une destruction de MASTER —
+      # garde-fou volontaire, jamais de retrait de master automatisé (risque
+      # de perte de quorum etcd, hors scope de ce mécanisme).
+      - name: Detect which worker(s) are about to be destroyed
+        id: nodes
+        working-directory: terraform/clusters/${{ matrix.org }}
+        env:
+          TF_VAR_vault_role_id: ${{ secrets.VAULT_CI_ROLE_ID }}
+          TF_VAR_vault_secret_id: ${{ secrets.VAULT_CI_SECRET_ID }}
+        run: bash ../../scripts/detect-worker-removal.sh
+
+      # drain/delete-node sont des opérations API Kubernetes pures, faites en
+      # kubectl direct (pas Ansible) ; rke2-killall/rke2-uninstall se font en
+      # SSH via le playbook dédié (04-remove-node.yml), toujours --limit sur
+      # CE node précisément. Si le drain échoue/timeout (set -e), le job
+      # échoue net : AUCUNE VM n'est détruite ensuite (intervention manuelle
+      # requise), jamais de bascule automatique en force.
+      - name: Drain and remove node(s) from the Kubernetes cluster
+        if: steps.nodes.outputs.nodes_to_remove != '[]'
+        working-directory: ansible
+        shell: bash
+        env:
+          VAULT_ROLE_ID: ${{ secrets.VAULT_CI_ROLE_ID }}
+          VAULT_SECRET_ID: ${{ secrets.VAULT_CI_SECRET_ID }}
+        run: |
+          set -euo pipefail
+          ORG="${{ matrix.org }}"
+          NODES='${{ steps.nodes.outputs.nodes_to_remove }}'
+
+          source ./fetch-kubeconfig.sh "${ORG}"
+
+          echo "${NODES}" | jq -r '.[]' | while IFS= read -r node; do
+            echo "Draining ${node}..."
+            kubectl drain "${node}" --ignore-daemonsets --delete-emptydir-data --force --timeout=120s
+          done
+
+          source ./fetch-ssh-key.sh "${ORG}"
+          INV="../terraform/clusters/${ORG}/ansible-inventory/inventory-${ORG}.ini"
+          KEY_PATH="$(pwd)/.ssh_key_${ORG}"
+          LIMIT="$(echo "${NODES}" | jq -r 'join(",")')"
+
+          # Même fix que ansible-configure-clusters.yml : group_vars/ doit
+          # être au même niveau que le fichier d'inventaire pour que
+          # group_vars/agent.yml se résolve correctement.
+          ln -sfn "$(pwd)/group_vars" "../terraform/clusters/${ORG}/ansible-inventory/group_vars"
+
+          ansible-playbook -i "$INV" -e cluster_org="${ORG}" -e ansible_ssh_private_key_file="${KEY_PATH}" --limit "${LIMIT}" playbooks/04-remove-node.yml
+
+          echo "${NODES}" | jq -r '.[]' | while IFS= read -r node; do
+            echo "Deleting node ${node} from the cluster..."
+            kubectl delete node "${node}"
+          done
+
+      # Seulement si tout ce qui précède a réussi : la VM du worker peut
+      # maintenant être détruite proprement (node déjà drainé, désinscrit,
+      # RKE2 désinstallé dessus).
+      - name: Terraform apply (destroy the removed worker's VM)
+        working-directory: terraform/clusters/${{ matrix.org }}
+        env:
+          TF_VAR_vault_role_id: ${{ secrets.VAULT_CI_ROLE_ID }}
+          TF_VAR_vault_secret_id: ${{ secrets.VAULT_CI_SECRET_ID }}
+        run: terraform apply -auto-approve -input=false
+
+      - name: Commit generated Ansible inventory
+        working-directory: terraform/clusters/${{ matrix.org }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "ansible-inventory/inventory-${{ matrix.org }}.ini"
+          if git diff --cached --quiet; then
+            echo "Inventaire inchangé, rien à committer."
+          else
+            git commit -m "chore: update ansible inventory for ${{ matrix.org }}"
+            git push origin HEAD:main
+          fi
+
+  # --- Suppression complète de cluster ------------------------------------
+  # Comportement inchangé : aucun drain ajouté. Tout le cluster disparaît de
+  # toute façon, un drain n'apporte aucune valeur fonctionnelle ici et
+  # risquerait de ralentir/bloquer le destroy pour rien.
+
+  delete-cluster:
+    needs: detect
+    if: needs.detect.outputs.orgs_delete != '[]'
+    runs-on: self-hosted
+    strategy:
+      fail-fast: false
+      matrix:
+        org: ${{ fromJson(needs.detect.outputs.orgs_delete || '[]') }}
+    steps:
+      # L'admin a déjà supprimé lui-même clusters/<org>/ dans le commit qui a
+      # déclenché ce run (c'est cette disparition que detect a repérée).
+      # Terraform a encore besoin du code du cluster pour le destroy — on
+      # checkout donc le commit PRÉCÉDENT, celui où le dossier existait
+      # encore.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.before }}
+
+      - name: Vault auth + fetch B2 credentials
+        uses: hashicorp/vault-action@v3
+        with:
+          url: ${{ vars.VAULT_ADDR }}
+          method: approle
+          path: terraform-orgs
+          roleId: ${{ secrets.VAULT_CI_ROLE_ID }}
+          secretId: ${{ secrets.VAULT_CI_SECRET_ID }}
+          exportToken: true
+          secrets: |
+            devver-infra-deployment/data/s3-backend key_id | AWS_ACCESS_KEY_ID ;
+            devver-infra-deployment/data/s3-backend application_key | AWS_SECRET_ACCESS_KEY
+
+      - name: Terraform init
+        working-directory: terraform/clusters/${{ matrix.org }}
+        run: terraform init -backend-config=backend.hcl -input=false
+
+      - name: Terraform destroy
+        working-directory: terraform/clusters/${{ matrix.org }}
+        env:
+          TF_VAR_vault_role_id: ${{ secrets.VAULT_CI_ROLE_ID }}
+          TF_VAR_vault_secret_id: ${{ secrets.VAULT_CI_SECRET_ID }}
+        run: terraform destroy -auto-approve -input=false
+
+  vault-cleanup:
+    needs: [detect, delete-cluster]
+    if: needs.detect.outputs.orgs_delete != '[]'
+    runs-on: self-hosted
+    strategy:
+      fail-fast: false
+      matrix:
+        org: ${{ fromJson(needs.detect.outputs.orgs_delete || '[]') }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Vault auth + fetch B2 credentials
+        uses: hashicorp/vault-action@v3
+        with:
+          url: ${{ vars.VAULT_ADDR }}
+          method: approle
+          path: terraform-orgs
+          roleId: ${{ secrets.VAULT_CI_ROLE_ID }}
+          secretId: ${{ secrets.VAULT_CI_SECRET_ID }}
+          exportToken: true
+          secrets: |
+            devver-infra-deployment/data/s3-backend key_id | AWS_ACCESS_KEY_ID ;
+            devver-infra-deployment/data/s3-backend application_key | AWS_SECRET_ACCESS_KEY
+
+      # État RÉEL de Vault (pas un scan du repo) — ne retire QUE l'org
+      # explicitement ciblée par ce run, dont l'infra vient d'être détruite
+      # juste avant. Toute autre org présente dans Vault reste dans la liste
+      # appliquée, donc jamais affectée.
       - name: Compute orgs (existing minus target)
         id: orgs
         run: |
-          remaining=$(bash terraform/scripts/list-vault-orgs.sh | grep -v "^${{ inputs.org }}$" || true)
+          remaining=$(bash terraform/scripts/list-vault-orgs.sh | grep -v "^${{ matrix.org }}$" || true)
           echo "orgs=$(printf '%s\n' "${remaining}" | jq -R . | jq -s -c 'map(select(length > 0))')" >> "$GITHUB_OUTPUT"
 
       - name: Terraform init

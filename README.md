@@ -14,10 +14,13 @@ déclencheur :
    détecte automatiquement une nouvelle org et crée sa structure Vault
    (mount, policy, secret cloné depuis un template). N'agit que sur l'org
    ajoutée, jamais sur les autres.
-2. **`2 - Proxmox: apply/destroy cluster`** — déclenché manuellement
-   (`workflow_dispatch`, org + action en input) : crée les VMs (après que
-   l'admin a saisi les vrais secrets dans Vault), ou détruit l'infra d'une
-   org puis nettoie sa structure Vault.
+2. **`2 - Proxmox: apply/destroy cluster`** — push sur `terraform/clusters/**`
+   détecte automatiquement l'une de 4 actions selon ce qui a changé :
+   `create-cluster` (nouveau dossier + structure Vault déjà créée),
+   `delete-cluster` (dossier supprimé), `add-worker`/`remove-worker`
+   (`additional_workers_count` modifié dans `values.auto.tfvars`) —
+   `remove-worker` draine et désinscrit proprement le node du cluster
+   Kubernetes **avant** que Terraform ne détruise sa VM.
 3. **`3 - Ansible: configurer les clusters`** — push sur `ansible/**`
    applique automatiquement les playbooks RKE2 à **tous** les clusters
    existants (idempotent, indépendant des deux workflows précédents).
@@ -77,9 +80,13 @@ Voir [`terraform/DEPLOY.md`](terraform/DEPLOY.md) et
   SSH, mot de passe VM) n'est jamais commité ni codé en dur — voir la
   [convention Vault](terraform/README.md#convention-vault) pour le détail des
   chemins et de ce que Terraform écrit ou lit seulement.
-- **Validation humaine avant toute action sensible** : la pipeline s'arrête et
-  attend une approbation explicite avant de créer des secrets ou de détruire
-  de l'infrastructure — jamais d'automatisation "silencieuse" sur ces points.
+- **Validation humaine avant toute action sensible** : la création de
+  structure Vault reste un déclenchement manuel explicite
+  (`workflow_dispatch`). Les opérations sur l'infra Proxmox (créer, détruire,
+  scale up/down) se pilotent par push — la revue du commit/PR tient lieu de
+  validation, remplacée pour `remove-worker` par un garde-fou automatique qui
+  bloque tout retrait de master et échoue net si le drain Kubernetes se
+  bloque (aucune VM détruite dans ce cas).
 - **Isolation par organisation** : chaque cluster a son propre state Terraform,
   sa propre plage IP, ses propres secrets — la panne ou la modification d'un
   cluster n'affecte jamais les autres.

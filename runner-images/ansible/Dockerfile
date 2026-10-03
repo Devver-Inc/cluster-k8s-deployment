@@ -3,7 +3,7 @@
 # ne change pas (voir .github/workflows/ansible-configure-clusters.yml, qui
 # extrait cette ligne par grep pour construire le tag de l'image).
 #
-# IMAGE_VERSION=8
+# IMAGE_VERSION=9
 #
 # Incrémenter cette version à chaque changement de ce Dockerfile ou de
 # ansible/requirements.yml, pour forcer un rebuild/push.
@@ -11,11 +11,18 @@
 # Contient tout ce dont le job a besoin, y compris le login Vault
 # (hashicorp/vault-action tourne dans ce même conteneur) : Ansible + la
 # collection community.hashi_vault, le CLI vault (pour fetch-ssh-key.sh), git
-# (actions/checkout), un client SSH (connexion aux VMs cibles) et jq (utilisé
-# par terraform/scripts/list-orgs.sh dans le job list-clusters).
+# (actions/checkout), un client SSH (connexion aux VMs cibles), jq (utilisé
+# par terraform/scripts/list-orgs.sh dans le job list-clusters) et kubectl
+# (utilisé par le job remove-worker pour drainer/désinscrire un node avant
+# que Terraform ne détruise sa VM — voir fetch-kubeconfig.sh et
+# playbooks/04-remove-node.yml).
 FROM python:3.12-slim
 
 ARG VAULT_VERSION=1.17.6
+# Alignée sur rke2_version dans ansible/group_vars/all.yml (v1.30.5+rke2r1) —
+# kubectl reste compatible +/- 1 version mineure avec le serveur, mais autant
+# matcher précisément.
+ARG KUBECTL_VERSION=v1.30.5
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -29,6 +36,9 @@ RUN apt-get update \
         "https://releases.hashicorp.com/vault/${VAULT_VERSION}/vault_${VAULT_VERSION}_linux_amd64.zip" \
     && unzip /tmp/vault.zip -d /usr/local/bin \
     && rm /tmp/vault.zip \
+    && curl -fsSL -o /usr/local/bin/kubectl \
+        "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
+    && chmod +x /usr/local/bin/kubectl \
     && rm -rf /var/lib/apt/lists/*
 
 # Version épinglée strictement : ~=2.17 résolvait vers 2.21.4 (probablement

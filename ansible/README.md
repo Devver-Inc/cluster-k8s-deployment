@@ -1,8 +1,9 @@
 # Ansible — installation RKE2
 
-Trois playbooks indépendants (pas encore raccordés à la pipeline CI) qui
-amènent les VMs provisionnées par Terraform jusqu'à un cluster RKE2
-fonctionnel. Cible : Rocky Linux 9 (template Terraform actuel).
+Quatre playbooks indépendants qui amènent les VMs provisionnées par
+Terraform jusqu'à un cluster RKE2 fonctionnel, et retirent proprement un
+node avant qu'il ne soit détruit. Cible : Rocky Linux 9 (template Terraform
+actuel).
 
 ## Prérequis
 
@@ -73,6 +74,13 @@ ansible-playbook -i "$INV" -e cluster_org=<org> -e ansible_ssh_private_key_file=
    kubeconfig (adapté pour pointer vers l'IP réelle plutôt que `127.0.0.1`),
    écrit `kubeconfig` + `rke2_token` dans Vault sans écraser les champs déjà
    présents (`vm_user`, `ssh_public_key`, ...).
+4. **`04-remove-node.yml`** — désinstalle RKE2 (`rke2-killall.sh` puis
+   `rke2-uninstall.sh`) sur un worker déjà drainé côté Kubernetes, juste
+   avant que Terraform ne détruise sa VM. **Toujours** lancé avec `--limit`
+   ciblant précisément le(s) node(s) concerné(s) (jamais tout l'inventaire),
+   orchestré par le job `remove-worker` de
+   [`proxmox-deploy-cluster.yml`](../.github/workflows/proxmox-deploy-cluster.yml)
+   — voir [Retrait d'un worker](#retrait-dun-worker) plus bas.
 
 ## Limitation connue — jonction sans VIP
 
@@ -83,6 +91,41 @@ les masters/workers déjà joints continuent de fonctionner entre eux, mais un
 tard vers une VIP HAProxy devant les masters — implique de reconfigurer
 `server:` sur tous les nœuds et de régénérer le kubeconfig stocké dans Vault
 pour qu'il pointe vers cette VIP plutôt que l'IP du 1er master.
+
+## Retrait d'un worker
+
+Avant cette procédure, réduire `additional_workers_count` dans
+`values.auto.tfvars` puis relancer `terraform apply` détruisait directement
+la VM du worker **sans jamais le retirer du cluster** — le node restait
+`NotReady` indéfiniment dans `kubectl get nodes`, rien ne le nettoyait après
+coup.
+
+Le job `remove-worker` de
+[`proxmox-deploy-cluster.yml`](../.github/workflows/proxmox-deploy-cluster.yml)
+automatise désormais la séquence complète, dans cet ordre strict :
+
+1. `terraform/scripts/detect-worker-removal.sh` lit un vrai `terraform plan`
+   pour savoir EXACTEMENT quel(s) `worker-N` va être détruit — échoue net
+   (garde-fou) si le plan révèle la destruction d'un **master** (retrait de
+   master non supporté par ce mécanisme, risque de perte de quorum etcd,
+   intervention manuelle requise).
+2. `fetch-kubeconfig.sh` récupère le kubeconfig depuis Vault (même pattern
+   que `fetch-ssh-key.sh` : fichier temporaire, `trap EXIT`, jamais
+   committé), puis `kubectl drain <node> --ignore-daemonsets
+   --delete-emptydir-data --force --timeout=120s` — **si le drain
+   échoue/timeout, tout le job échoue, aucune VM n'est détruite ensuite**
+   (pas de bascule automatique en force au-delà de ce qui est déjà dans la
+   commande).
+3. `playbooks/04-remove-node.yml` (SSH, `--limit` sur le node ciblé) :
+   `rke2-killall.sh` puis `rke2-uninstall.sh`.
+4. `kubectl delete node <node>` — le node disparaît de `kubectl get nodes`.
+5. **Seulement si tout ce qui précède a réussi** : `terraform apply` détruit
+   la VM, désormais proprement désinscrite du cluster.
+
+Drain/delete-node se font en `kubectl` direct depuis le job CI (pas en
+Ansible) : ce sont des opérations API Kubernetes pures, sans rapport avec le
+node lui-même — Ansible n'intervient que pour la partie SSH/désinstallation
+système (`04-remove-node.yml`).
 
 ## Isolation (exécution en conteneur)
 

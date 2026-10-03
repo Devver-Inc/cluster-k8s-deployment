@@ -5,12 +5,18 @@ vide. Pour une org suivante, sauter aux étapes marquées **(nouvelle org)**.
 
 Ce guide décrit la procédure **manuelle** (debug/test local). En usage normal,
 une fois la pipeline CI en place (voir [section dédiée](#via-la-pipeline-ci)
-en fin de fichier) : pour **créer** un cluster, il suffit de créer un dossier
-`terraform/clusters/<org>/` et de merger la PR ; pour **supprimer** un cluster,
-ne jamais supprimer le dossier soi-même — lancer directement le workflow
-`2 - Proxmox: apply/destroy cluster` avec `action=delete`, c'est la pipeline
-qui retire le dossier une fois le destroy confirmé (voir la section dédiée
-pour le pourquoi).
+en fin de fichier), tout se pilote par **push** sur `terraform/clusters/**` —
+le workflow `2 - Proxmox: apply/destroy cluster` détecte automatiquement
+l'action à mener selon ce qui a changé :
+- **créer** un cluster : créer un dossier `terraform/clusters/<org>/` et
+  merger la PR.
+- **supprimer** un cluster : supprimer le dossier soi-même (`git rm -r
+  terraform/clusters/<org>/`) et merger — le destroy complet se déclenche
+  automatiquement sur ce push (voir la section dédiée pour le détail).
+- **ajouter/retirer un worker** : modifier `additional_workers_count` dans
+  `values.auto.tfvars` et merger — un retrait déclenche automatiquement un
+  retrait propre du node (drain + désinscription Kubernetes) avant la
+  destruction de sa VM (voir [`ansible/README.md`](../ansible/README.md#retrait-dun-worker)).
 
 ## Prérequis
 
@@ -159,11 +165,12 @@ la place, gratuitement sur tout plan :
      touchées, quel que soit l'état du repo checkouté.
 2. [`proxmox-deploy-cluster.yml`](../.github/workflows/proxmox-deploy-cluster.yml)
    (« **2 - Proxmox: apply/destroy cluster** » dans l'onglet Actions) —
-   déclenché **toujours manuellement** (**Actions > 2 - Proxmox: apply/destroy
-   cluster > Run workflow**), avec deux champs à renseigner (`org`, `action`).
-   Pour une création, `org`/`action=create` sont copiés depuis le résumé du
-   run précédent. Pour une suppression, se déclenche directement (voir plus
-   bas — jamais précédé d'une suppression manuelle du dossier).
+   déclenché **automatiquement par push** sur `terraform/clusters/**` (plus
+   de `workflow_dispatch` manuel pour ce workflow). Un job `detect` compare
+   l'état du repo avant/après le push (dossiers apparus/disparus,
+   `additional_workers_count` changé dans `values.auto.tfvars`) pour en
+   déduire l'une de 4 actions, chacune son propre job : `create-cluster`,
+   `delete-cluster`, `add-worker`, `remove-worker` (voir détail plus bas).
 
 Si l'org passe un jour sur un plan GitHub payant (Team/Enterprise), il devient
 possible de revenir à un unique workflow avec de vrais Environments — pas
@@ -188,11 +195,13 @@ workflows eux-mêmes) :
 - **`git`** — utilisé par le step `Remove cluster folder and push` (suppression
   d'un cluster, voir plus bas) pour committer et pousser sur `main`.
 - **`docker`** — utilisé par le workflow `3 - Ansible: configurer les
-  clusters` (voir `ansible/README.md`) pour builder/exécuter l'image
+  clusters` et par le job `remove-worker` de `2 - Proxmox` (voir
+  `ansible/README.md`) pour builder/exécuter l'image
   `runner-images/ansible/Dockerfile` dans laquelle tourne tout le job (Ansible
-  installé uniquement dans l'image, pas sur le runner). L'utilisateur qui fait
-  tourner le service `actions-runner` doit pouvoir lancer `docker build`/`docker
-  run` (membre du groupe `docker`, ou équivalent).
+  + `kubectl` installés uniquement dans l'image, pas sur le runner).
+  L'utilisateur qui fait tourner le service `actions-runner` doit pouvoir
+  lancer `docker build`/`docker run` (membre du groupe `docker`, ou
+  équivalent).
 
 > **Isolation** : les jobs `runs-on: self-hosted` s'exécutent **directement sur
 > la machine du runner**, pas dans un conteneur éphémère — contrairement aux
@@ -201,10 +210,10 @@ workflows eux-mêmes) :
 > dossier de travail du repo (les credentials injectés en variables d'env ne
 > survivent pas au job qui les exporte, mais rien d'autre n'est assaini
 > automatiquement). Accepté comme tel pour Terraform/Vault (repo privé, équipe
-> restreinte de confiance). Le workflow `3 - Ansible` fait exception : tout le
-> job (y compris le login Vault) tourne dans le conteneur
-> `runner-images/ansible/` (`container:` dans le YAML) — voir
-> `ansible/README.md#isolation`.
+> restreinte de confiance). Le workflow `3 - Ansible` et le job `remove-worker`
+> de `2 - Proxmox` font exception : tout le job (y compris le login Vault)
+> tourne dans le conteneur `runner-images/ansible/` (`container:` dans le
+> YAML) — voir `ansible/README.md#isolation`.
 
 ### Prérequis one-shot (à faire manuellement avant le premier run)
 
@@ -249,30 +258,39 @@ vault write -f auth/terraform-orgs/role/terraform-ci/secret-id
 **Ajout d'un dossier `clusters/<org>/`** :
 Le push déclenche `vault-create-org.yml` en mode `detect` — il ne fait que
 signaler dans son résumé que `<org>` n'a pas encore de structure Vault.
-Lancer ensuite **manuellement** ce même workflow en `workflow_dispatch` avec
+Lancer **manuellement** ce même workflow en `workflow_dispatch` avec
 `org=<org>` → job `vault-create` (structure Vault créée pour cette org
 uniquement, sans toucher aux autres). Une fois les vrais secrets saisis dans
-Vault (Étape 2 ci-dessus), lancer manuellement `proxmox-deploy-cluster.yml`
-avec `action=create` → job `apply-infra-create` (VMs créées).
+Vault (Étape 2 ci-dessus), un **second push** (même vide, ou tout commit
+touchant `terraform/clusters/<org>/`) déclenche `proxmox-deploy-cluster.yml`
+→ `detect` reconnaît le dossier + la structure Vault désormais créée → job
+`create-cluster` (VMs créées).
 
-**Supprimer un cluster** — ne jamais supprimer `clusters/<org>/` soi-même :
+**Supprimer un cluster** — supprimer `terraform/clusters/<org>/` soi-même
+(`git rm -r terraform/clusters/<org>/`) et pousser sur `main` :
 
-Lancer directement `proxmox-deploy-cluster.yml` (**Actions > 2 - Proxmox:
-apply/destroy cluster > Run workflow**) avec `org=<org>` et `action=delete`,
-dossier encore présent dans le repo. Le job `destroy-infra` détruit les VMs
-(le code Terraform est disponible directement dans le checkout normal, plus
-besoin de retrouver un commit de suppression dans l'historique — ancien
-mécanisme abandonné, trop fragile si des commits s'accumulent entre la
-suppression du dossier et le déclenchement de la pipeline), puis **la
-pipeline elle-même** committe et pousse la suppression du dossier sur `main`.
-Le job `vault-cleanup` termine en nettoyant la structure Vault de l'org.
+Le job `detect` repère la disparition du dossier → job `delete-cluster`
+(checkout du commit **précédent**, où le code existe encore, pour pouvoir
+faire le `terraform destroy`), puis `vault-cleanup` nettoie la structure
+Vault de l'org. Rien d'autre à committer après coup — le dossier a déjà
+disparu dans le commit qui a déclenché tout ça.
 
-Ce commit automatique redéclenche `vault-create-org.yml` (même trigger sur
-`terraform/clusters/**`) — normal, il se termine sans rien faire (`action=none`,
-aucune nouvelle org à créer dans ce diff).
+**Ajouter/retirer un worker** — modifier `additional_workers_count` dans
+`values.auto.tfvars` et pousser sur `main` :
 
-> **Permission requise** : le commit automatique utilise le `GITHUB_TOKEN` par
-> défaut du job pour pousser sur `main`. Vérifier que les Actions du repo ont
-> la permission d'écriture (Settings > Actions > General > Workflow
-> permissions > **Read and write permissions**), sinon le step `Remove cluster
-> folder and push` échoue avec une erreur d'autorisation.
+- Valeur **augmentée** → job `add-worker` : `terraform apply` ajoute
+  directement la nouvelle VM (`for_each` sur une clé `worker-N`, aucune
+  autre ressource touchée).
+- Valeur **diminuée** → job `remove-worker` : voir
+  [`ansible/README.md#retrait-dun-worker`](../ansible/README.md#retrait-dun-worker)
+  pour la séquence complète (drain Kubernetes, désinstallation RKE2 via SSH,
+  retrait du node, **puis seulement** destruction de la VM). Échoue
+  explicitement sans rien détruire si le plan révèle un retrait de
+  **master** (`node_count` modifié plutôt que `additional_workers_count`) —
+  intervention manuelle requise dans ce cas.
+
+> **Permission requise** : les commits automatiques (inventaire Ansible
+> régénéré) utilisent le `GITHUB_TOKEN` par défaut du job pour pousser sur
+> `main`. Vérifier que les Actions du repo ont la permission d'écriture
+> (Settings > Actions > General > Workflow permissions > **Read and write
+> permissions**), sinon ces steps échouent avec une erreur d'autorisation.
