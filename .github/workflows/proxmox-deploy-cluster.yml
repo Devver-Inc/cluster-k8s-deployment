@@ -22,11 +22,27 @@ name: "2 - Proxmox: apply/destroy cluster"
 # Pas de risque de destruction croisée entre orgs (contrairement à
 # terraform/vault/, un seul for_each partagé) : chaque org a son propre state
 # Terraform isolé dans terraform/clusters/<org>/.
+#
+# workflow_dispatch (org en input) reste disponible pour UN cas précis que le
+# push ne peut pas couvrir : la structure Vault est créée automatiquement dès
+# qu'un dossier clusters/<org>/ apparaît (voir vault-create-org.yml), mais
+# saisir les VRAIS secrets dans Vault (vm_password, ssh_private_key...) est
+# une opération qui se fait directement dans Vault, jamais via un commit git
+# — aucun push ne se reproduit donc automatiquement pour redéclencher
+# create-cluster une fois les secrets prêts. Ce déclenchement manuel comble
+# ce trou sans réintroduire le binaire create/delete d'origine : toujours
+# uniquement create-cluster, jamais delete/add/remove par ce chemin.
 on:
   push:
     branches: [main]
     paths:
       - "terraform/clusters/**"
+  workflow_dispatch:
+    inputs:
+      org:
+        description: "Organisation pour laquelle relancer create-cluster (secrets Vault déjà saisis)"
+        required: true
+        type: string
 
 env:
   VAULT_ADDR: ${{ vars.VAULT_ADDR }}
@@ -45,12 +61,15 @@ jobs:
     steps:
       # fetch-depth: 0 — detect-cluster-change.sh compare le commit courant
       # au précédent (git ls-tree / git show sur les deux SHA), un checkout
-      # superficiel n'aurait pas l'historique nécessaire.
+      # superficiel n'aurait pas l'historique nécessaire. Pas nécessaire en
+      # workflow_dispatch : pas de diff à faire, l'org cible est déjà connue.
       - uses: actions/checkout@v4
+        if: github.event_name == 'push'
         with:
           fetch-depth: 0
 
       - name: Vault auth
+        if: github.event_name == 'push'
         uses: hashicorp/vault-action@v3
         with:
           url: ${{ vars.VAULT_ADDR }}
@@ -61,7 +80,15 @@ jobs:
           exportToken: true
 
       - id: detect
-        run: bash terraform/scripts/detect-cluster-change.sh "${{ github.event.before }}" "${{ github.sha }}"
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "orgs_create=$(jq -cn --arg org "${{ inputs.org }}" '[$org]')" >> "$GITHUB_OUTPUT"
+            echo "orgs_delete=[]" >> "$GITHUB_OUTPUT"
+            echo "orgs_add_worker=[]" >> "$GITHUB_OUTPUT"
+            echo "orgs_remove_worker=[]" >> "$GITHUB_OUTPUT"
+          else
+            bash terraform/scripts/detect-cluster-change.sh "${{ github.event.before }}" "${{ github.sha }}"
+          fi
 
   # --- Création cluster --------------------------------------------------
 

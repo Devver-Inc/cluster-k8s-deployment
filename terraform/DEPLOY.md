@@ -264,10 +264,17 @@ Le push déclenche `vault-create-org.yml` : `detect` repère que `<org>` n'a
 pas encore de structure Vault → job `vault-create` la crée automatiquement
 (uniquement pour cette org, sans toucher aux autres). Le même push déclenche
 aussi `proxmox-deploy-cluster.yml`, mais `create-cluster` échoue à ce stade
-(secrets encore à leurs placeholders `CHANGE_ME`) : saisir les vrais secrets
-dans Vault (Étape 2 ci-dessus), puis pousser un **second commit** (même
-trivial) touchant `terraform/clusters/<org>/` pour redéclencher
-`create-cluster` avec les bons secrets cette fois.
+(secrets encore à leurs placeholders `CHANGE_ME`).
+
+Saisir les vrais secrets se fait **directement dans Vault** (UI ou CLI),
+jamais via un commit git — aucun push ne se reproduit donc automatiquement
+pour redéclencher `create-cluster` une fois les secrets prêts. Deux options
+pour relancer :
+- Pousser un commit (même trivial) touchant `terraform/clusters/<org>/`.
+- Ou lancer **manuellement** `proxmox-deploy-cluster.yml` en
+  `workflow_dispatch` (**Actions > 2 - Proxmox: apply/destroy cluster > Run
+  workflow**, input `org`) — filet de sécurité qui ne fait toujours QUE
+  `create-cluster` pour l'org donnée, jamais delete/add/remove par ce chemin.
 
 **Supprimer un cluster** — supprimer `terraform/clusters/<org>/` soi-même
 (`git rm -r terraform/clusters/<org>/`) et pousser sur `main` :
