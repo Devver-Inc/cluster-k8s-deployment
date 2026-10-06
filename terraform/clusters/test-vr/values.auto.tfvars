@@ -5,10 +5,10 @@
 # 4. Ajuster node_count/tags/ressources ci-dessous selon le besoin réel du cluster.
 # subnet_index n'est PAS défini ici : lu automatiquement depuis org_subnet_index[var.org].
 
-# Trigger CI (retest add-worker + configure, conteneur root + chown post-hoc)
+# Trigger CI (retest remove-worker, cycle complet create->configure->remove)
 org                      = "test-vr"
 node_count               = 3 # minimum 3 (masters+workers)
-additional_workers_count = 1
+additional_workers_count = 0
 tags                     = ["devver", "test-vr"]
 
 proxmox_node  = "PROXMOX-PVE1"
