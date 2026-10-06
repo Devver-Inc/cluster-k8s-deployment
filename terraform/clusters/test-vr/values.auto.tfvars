@@ -5,7 +5,7 @@
 # 4. Ajuster node_count/tags/ressources ci-dessous selon le besoin réel du cluster.
 # subnet_index n'est PAS défini ici : lu automatiquement depuis org_subnet_index[var.org].
 
-# Trigger CI (retest remove-worker, fix HOME=/tmp au niveau du step)
+# Trigger CI (retest remove-worker, fix ANSIBLE_LOCAL_TEMP sous le workspace)
 org                      = "test-vr"
 node_count               = 3 # minimum 3 (masters+workers)
 additional_workers_count = 0
