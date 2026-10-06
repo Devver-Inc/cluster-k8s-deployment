@@ -125,7 +125,11 @@ jobs:
             exit 0
           fi
 
-          eval "$(bash terraform/scripts/detect-cluster-change.sh "${{ github.event.before }}" "${{ github.sha }}")"
+          # GITHUB_OUTPUT est défini dans l'environnement du runner : sans
+          # "env -u", le script écrirait ses résultats dans ce fichier au
+          # lieu de stdout, et cet eval capturerait une sortie vide (bug
+          # réel rencontré : "unbound variable" sur orgs_to_plan).
+          eval "$(env -u GITHUB_OUTPUT bash terraform/scripts/detect-cluster-change.sh "${{ github.event.before }}" "${{ github.sha }}")"
           # eval ci-dessus définit orgs_delete= et orgs_to_plan= dans ce shell.
 
           orgs_create="[]"
@@ -136,7 +140,7 @@ jobs:
             cd "terraform/clusters/${org}"
             terraform init -backend-config=backend.hcl -input=false >&2
 
-            eval "$(bash ../../scripts/detect-cluster-plan.sh)"
+            eval "$(env -u GITHUB_OUTPUT bash ../../scripts/detect-cluster-plan.sh)"
             # eval ci-dessus définit action= et nodes_to_remove= pour cette org.
 
             case "${action}" in
