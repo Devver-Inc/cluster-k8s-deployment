@@ -7,23 +7,23 @@ self-hosted.
 
 ## Vue d'ensemble
 
-Trois workflows GitHub Actions indépendants, chacun avec son propre
-déclencheur :
+Deux workflows GitHub Actions, chacun avec son propre déclencheur :
 
 1. **`1 - Vault: création structure org`** — push sur `terraform/clusters/**`
    détecte automatiquement une nouvelle org et crée sa structure Vault
    (mount, policy, secret cloné depuis un template). N'agit que sur l'org
    ajoutée, jamais sur les autres.
-2. **`2 - Proxmox: apply/destroy cluster`** — push sur `terraform/clusters/**`
-   détecte automatiquement l'une de 4 actions selon ce qui a changé :
-   `create-cluster` (nouveau dossier + structure Vault déjà créée),
-   `delete-cluster` (dossier supprimé), `add-worker`/`remove-worker`
-   (`additional_workers_count` modifié dans `values.auto.tfvars`) —
-   `remove-worker` draine et désinscrit proprement le node du cluster
-   Kubernetes **avant** que Terraform ne détruise sa VM.
-3. **`3 - Ansible: configurer les clusters`** — push sur `ansible/**`
-   applique automatiquement les playbooks RKE2 à **tous** les clusters
-   existants (idempotent, indépendant des deux workflows précédents).
+2. **`2 - Proxmox: apply/destroy cluster`** — push sur
+   `terraform/clusters/**`, `ansible/**` ou `runner-images/ansible/**`.
+   Confirme par un vrai `terraform plan` (état réel, pas un simple diff de
+   commits) l'une de 4 actions selon ce qui a changé : `create-cluster`
+   (nouveau dossier + structure Vault déjà créée), `delete-cluster` (dossier
+   supprimé), `add-worker`/`remove-worker` (`additional_workers_count`
+   modifié dans `values.auto.tfvars`) — `remove-worker` draine et désinscrit
+   proprement le node du cluster Kubernetes **avant** que Terraform ne
+   détruise sa VM. Après un `create-cluster`/`add-worker` réussi, les
+   playbooks Ansible (RKE2) s'enchaînent **automatiquement**, uniquement sur
+   l'org concernée par ce push.
 
 Voir [`terraform/DEPLOY.md`](terraform/DEPLOY.md) et
 [`ansible/README.md`](ansible/README.md) pour le détail de chaque flux.
@@ -36,14 +36,14 @@ Voir [`terraform/DEPLOY.md`](terraform/DEPLOY.md) et
 | **Proxmox** | Hyperviseur on-prem qui héberge les VMs des clusters. |
 | **HashiCorp Vault** | Source unique des secrets (credentials Proxmox, backend B2, SSH/login VM par organisation) — jamais de secret en clair dans le repo. |
 | **Backblaze B2** | Stockage du `state` Terraform (backend compatible S3), un fichier par module (`vault/`, chaque `clusters/<org>/`). |
-| **GitHub Actions (runner self-hosted)** | Exécute la pipeline CI/CD sur l'infrastructure on-prem — un workflow pour la structure Vault, un pour l'infra Proxmox, un pour la configuration Ansible, indépendants les uns des autres. |
+| **GitHub Actions (runner self-hosted)** | Exécute la pipeline CI/CD sur l'infrastructure on-prem — un workflow pour la structure Vault, un pour l'infra Proxmox qui enchaîne aussi la configuration Ansible. |
 | **Ansible** | Configuration post-provisioning des VMs (installation RKE2) à partir de l'inventaire généré par Terraform et des secrets Vault. |
 
 ## Structure du repo
 
 ```
 .
-├── .github/workflows/       # pipeline CI (vault-create-org.yml, proxmox-deploy-cluster.yml, ansible-configure-clusters.yml)
+├── .github/workflows/       # pipeline CI (vault-create-org.yml, proxmox-deploy-cluster.yml — ce dernier inclut aussi Ansible)
 ├── runner-images/
 │   └── ansible/              # Dockerfile (versionné via IMAGE_VERSION=) de l'image du job Ansible (voir ansible/README.md#isolation)
 ├── terraform/

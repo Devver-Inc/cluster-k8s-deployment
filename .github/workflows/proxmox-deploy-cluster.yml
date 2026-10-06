@@ -3,21 +3,36 @@ name: "2 - Proxmox: apply/destroy cluster"
 # Déclenché par push sur terraform/clusters/** — l'admin édite un fichier
 # (crée/supprime un dossier terraform/clusters/<org>/, ou change
 # additional_workers_count dans values.auto.tfvars) et pushe ; le job
-# "detect" déduit l'action qui en découle pour chaque org concernée :
-#   - create-cluster : nouveau dossier, structure Vault déjà créée (1 -
-#     Vault doit avoir tourné avant).
-#   - delete-cluster : dossier disparu.
-#   - add-worker     : additional_workers_count a augmenté.
-#   - remove-worker  : additional_workers_count a diminué — DRAINE et
-#     désinscrit le(s) worker(s) concerné(s) du cluster Kubernetes AVANT que
-#     Terraform ne détruise leur VM (sinon le node reste NotReady zombie
-#     indéfiniment dans kubectl get nodes — rien ne le nettoie jamais après
-#     coup).
+# "detect" déduit l'action qui en découle pour chaque org concernée, en 2
+# étapes :
+#   1. Présélection légère (detect-cluster-change.sh) : quelles orgs ont un
+#      dossier apparu/disparu, ou un fichier .tf/values.auto.tfvars modifié
+#      dans ce push — ne décide JAMAIS seul d'une action, réduit seulement
+#      l'espace de recherche avant l'étape 2.
+#   2. Confirmation par ÉTAT RÉEL (detect-cluster-plan.sh) : pour chaque org
+#      candidate, un vrai `terraform plan` tranche l'action réelle
+#      (create-cluster / add-worker / remove-worker / aucune) en comparant
+#      le VOULU (values.auto.tfvars) au state Terraform réel sur B2 — fiable
+#      et idempotent par construction, contrairement à un diff entre deux
+#      commits consécutifs (github.event.before/github.sha), qui peut rater
+#      un delta si un run échoue entre deux push ou si plusieurs push
+#      s'enchaînent rapidement. C'est exactement la même leçon déjà tirée
+#      sur l'ancien detect-org-change.sh (voir terraform/README.md) :
+#      comparer un état réel plutôt qu'un historique de commits.
+#   - delete-cluster : dossier absent du repo mais toujours connu de Vault
+#     (comparaison d'état, pas de plan possible — le dossier a disparu).
+#   - remove-worker : DRAINE et désinscrit le(s) worker(s) concerné(s) du
+#     cluster Kubernetes AVANT que Terraform ne détruise leur VM (sinon le
+#     node reste NotReady zombie indéfiniment dans kubectl get nodes — rien
+#     ne le nettoie jamais après coup).
 #
-# Avant cette refonte, le workflow était piloté par workflow_dispatch
-# (org+action=create/delete saisis à la main) et ne distinguait pas
-# scale-up/scale-down d'un worker d'une création/destruction complète de
-# cluster — aucun retrait propre de node n'existait pour le cas scale down.
+# Ansible (installation/configuration RKE2) s'enchaîne AUTOMATIQUEMENT après
+# un terraform apply réussi pour create-cluster et add-worker (job
+# "configure" ci-dessous) — ce workflow absorbe entièrement l'ancien "3 -
+# Ansible: configurer les clusters" (découplé auparavant, déclenché par push
+# sur ansible/** et reconfigurant TOUJOURS tous les clusters existants, gros
+# overhead). Le job "configure" ne cible désormais que l'org concernée par
+# CE push, jamais les autres.
 #
 # Pas de risque de destruction croisée entre orgs (contrairement à
 # terraform/vault/, un seul for_each partagé) : chaque org a son propre state
@@ -37,6 +52,9 @@ on:
     branches: [main]
     paths:
       - "terraform/clusters/**"
+      - "ansible/**"
+      - "runner-images/ansible/**"
+      - ".github/workflows/proxmox-deploy-cluster.yml"
   workflow_dispatch:
     inputs:
       org:
@@ -54,22 +72,26 @@ jobs:
   detect:
     runs-on: self-hosted
     outputs:
-      orgs_create: ${{ steps.detect.outputs.orgs_create }}
-      orgs_delete: ${{ steps.detect.outputs.orgs_delete }}
-      orgs_add_worker: ${{ steps.detect.outputs.orgs_add_worker }}
-      orgs_remove_worker: ${{ steps.detect.outputs.orgs_remove_worker }}
+      orgs_create: ${{ steps.plan.outputs.orgs_create }}
+      orgs_delete: ${{ steps.plan.outputs.orgs_delete }}
+      orgs_add_worker: ${{ steps.plan.outputs.orgs_add_worker }}
+      orgs_remove_worker: ${{ steps.plan.outputs.orgs_remove_worker }}
+      # Union de orgs_create et orgs_add_worker, précalculée ici (pas dans
+      # une expression YAML côté job configure) : évite une expression
+      # fromJson/toJson imbriquée fragile pour construire la matrix du job
+      # Ansible aval, qui cible les deux cas avec le même contenu de step.
+      orgs_configure: ${{ steps.plan.outputs.orgs_configure }}
     steps:
-      # fetch-depth: 0 — detect-cluster-change.sh compare le commit courant
-      # au précédent (git ls-tree / git show sur les deux SHA), un checkout
+      # fetch-depth: 0 — detect-cluster-change.sh (présélection) compare le
+      # commit courant au précédent (git ls-tree / git diff), un checkout
       # superficiel n'aurait pas l'historique nécessaire. Pas nécessaire en
-      # workflow_dispatch : pas de diff à faire, l'org cible est déjà connue.
+      # workflow_dispatch : pas de présélection à faire, l'org cible est
+      # déjà connue.
       - uses: actions/checkout@v4
-        if: github.event_name == 'push'
         with:
           fetch-depth: 0
 
-      - name: Vault auth
-        if: github.event_name == 'push'
+      - name: Vault auth + fetch B2 credentials
         uses: hashicorp/vault-action@v3
         with:
           url: ${{ vars.VAULT_ADDR }}
@@ -78,17 +100,71 @@ jobs:
           roleId: ${{ secrets.VAULT_CI_ROLE_ID }}
           secretId: ${{ secrets.VAULT_CI_SECRET_ID }}
           exportToken: true
+          secrets: |
+            devver-infra-deployment/data/s3-backend key_id | AWS_ACCESS_KEY_ID ;
+            devver-infra-deployment/data/s3-backend application_key | AWS_SECRET_ACCESS_KEY
 
-      - id: detect
+      # Étape 1 (présélection) + étape 2 (confirmation par plan, une fois
+      # par org candidate) — regroupées ici : la confirmation a besoin des
+      # credentials B2/Vault déjà exportés dans ce step pour faire un
+      # terraform init/plan par org.
+      - id: plan
+        env:
+          TF_VAR_vault_role_id: ${{ secrets.VAULT_CI_ROLE_ID }}
+          TF_VAR_vault_secret_id: ${{ secrets.VAULT_CI_SECRET_ID }}
         run: |
+          set -euo pipefail
+
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "orgs_create=$(jq -cn --arg org "${{ inputs.org }}" '[$org]')" >> "$GITHUB_OUTPUT"
+            org_json="$(jq -cn --arg org "${{ inputs.org }}" '[$org]')"
+            echo "orgs_create=${org_json}" >> "$GITHUB_OUTPUT"
             echo "orgs_delete=[]" >> "$GITHUB_OUTPUT"
             echo "orgs_add_worker=[]" >> "$GITHUB_OUTPUT"
             echo "orgs_remove_worker=[]" >> "$GITHUB_OUTPUT"
-          else
-            bash terraform/scripts/detect-cluster-change.sh "${{ github.event.before }}" "${{ github.sha }}"
+            echo "orgs_configure=${org_json}" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+
+          eval "$(bash terraform/scripts/detect-cluster-change.sh "${{ github.event.before }}" "${{ github.sha }}")"
+          # eval ci-dessus définit orgs_delete= et orgs_to_plan= dans ce shell.
+
+          orgs_create="[]"
+          orgs_add_worker="[]"
+          orgs_remove_worker="[]"
+
+          for org in $(echo "${orgs_to_plan}" | jq -r '.[]'); do
+            cd "terraform/clusters/${org}"
+            terraform init -backend-config=backend.hcl -input=false >&2
+
+            eval "$(bash ../../scripts/detect-cluster-plan.sh)"
+            # eval ci-dessus définit action= et nodes_to_remove= pour cette org.
+
+            case "${action}" in
+              create-cluster)
+                orgs_create=$(echo "${orgs_create}" | jq -c --arg org "${org}" '. + [$org]')
+                ;;
+              add-worker)
+                orgs_add_worker=$(echo "${orgs_add_worker}" | jq -c --arg org "${org}" '. + [$org]')
+                ;;
+              remove-worker)
+                orgs_remove_worker=$(echo "${orgs_remove_worker}" | jq -c --arg org "${org}" '. + [$org]')
+                ;;
+            esac
+
+            cd - >/dev/null
+          done
+
+          orgs_configure=$(jq -cn --argjson a "${orgs_create}" --argjson b "${orgs_add_worker}" '($a + $b) | unique')
+
+          echo "detect: orgs_create=${orgs_create} orgs_delete=${orgs_delete} orgs_add_worker=${orgs_add_worker} orgs_remove_worker=${orgs_remove_worker} orgs_configure=${orgs_configure}" >&2
+
+          {
+            echo "orgs_create=${orgs_create}"
+            echo "orgs_delete=${orgs_delete}"
+            echo "orgs_add_worker=${orgs_add_worker}"
+            echo "orgs_remove_worker=${orgs_remove_worker}"
+            echo "orgs_configure=${orgs_configure}"
+          } >> "$GITHUB_OUTPUT"
 
   # --- Création cluster --------------------------------------------------
 
@@ -137,9 +213,10 @@ jobs:
         run: terraform apply -auto-approve -input=false
 
       # local_file.ansible_inventory (module/outputs.tf) n'existe que sur le
-      # disque du runner après l'apply — sans ce commit, le workflow "3 -
-      # Ansible" ne trouve jamais l'inventaire (il tourne à partir d'un
-      # checkout frais).
+      # disque du runner après l'apply — committé ICI, avant tout run
+      # Ansible, pour que l'inventaire reflète toujours l'état réel même si
+      # le job "configure" qui suit échoue ensuite (pas de fenêtre où
+      # l'inventaire committé serait périmé).
       - name: Commit generated Ansible inventory
         working-directory: terraform/clusters/${{ matrix.org }}
         run: |
@@ -192,6 +269,7 @@ jobs:
           TF_VAR_vault_secret_id: ${{ secrets.VAULT_CI_SECRET_ID }}
         run: terraform apply -auto-approve -input=false
 
+      # Committé ICI (avant Ansible), même raison que create-cluster.
       - name: Commit generated Ansible inventory
         working-directory: terraform/clusters/${{ matrix.org }}
         run: |
@@ -205,11 +283,11 @@ jobs:
             git push origin HEAD:main
           fi
 
-  # --- Retrait de worker (drain + désinscription AVANT destruction VM) ---
+  # --- Build de l'image Docker Ansible (réutilisée par configure + remove-worker) ---
 
-  remove-worker-build-image:
+  build-ansible-image:
     needs: detect
-    if: needs.detect.outputs.orgs_remove_worker != '[]'
+    if: needs.detect.outputs.orgs_create != '[]' || needs.detect.outputs.orgs_add_worker != '[]' || needs.detect.outputs.orgs_remove_worker != '[]'
     runs-on: self-hosted
     permissions:
       packages: write
@@ -235,7 +313,8 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # Réutilise l'image si elle existe déjà sur GHCR pour cette version —
-      # rebuild uniquement quand IMAGE_VERSION du Dockerfile a été incrémentée.
+      # rebuild uniquement quand la ligne IMAGE_VERSION= du Dockerfile a été
+      # incrémentée (donc quand le Dockerfile ou requirements.yml a changé).
       - name: Build & push Ansible runner image (si absente pour cette version)
         run: |
           set -euo pipefail
@@ -247,16 +326,97 @@ jobs:
             docker push "$IMAGE"
           fi
 
+  # --- Configuration Ansible (après create-cluster ou add-worker) --------
+
+  configure:
+    needs: [detect, create-cluster, add-worker, build-ansible-image]
+    # Se déclenche dès que l'un des deux jobs Terraform amont a réussi, sans
+    # être bloqué si l'autre a été skip (pas concerné ce run) — seul un
+    # ÉCHEC explicite de l'un des deux empêche Ansible de tourner.
+    if: |
+      always() &&
+      needs.create-cluster.result != 'failure' && needs.add-worker.result != 'failure' &&
+      needs.build-ansible-image.result == 'success' &&
+      needs.detect.outputs.orgs_configure != '[]'
+    runs-on: self-hosted
+    container:
+      image: ${{ needs.build-ansible-image.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    strategy:
+      fail-fast: false
+      # orgs_configure = union de orgs_create et orgs_add_worker, déjà
+      # précalculée par le job detect — ce workflow ne cible QUE l'org
+      # concernée par CE push, jamais tous les clusters existants
+      # (contrairement à l'ancien "3 - Ansible", qui reconfigurait TOUJOURS
+      # toutes les orgs à chaque push sur ansible/**).
+      matrix:
+        org: ${{ fromJson(needs.detect.outputs.orgs_configure || '[]') }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Même AppRole terraform-ci que Terraform (voir terraform/README.md) —
+      # sa policy couvre déjà la lecture/écriture sur devver-infra-deployment/data/*.
+      # Tourne dans le même conteneur que les playbooks (voir container: au
+      # niveau du job) : le token Vault n'est jamais exposé à plat sur le runner.
+      - name: Resolve Vault AppRole credentials
+        id: vault_login
+        uses: hashicorp/vault-action@v3
+        with:
+          url: ${{ vars.VAULT_ADDR }}
+          method: approle
+          path: terraform-orgs
+          roleId: ${{ secrets.VAULT_CI_ROLE_ID }}
+          secretId: ${{ secrets.VAULT_CI_SECRET_ID }}
+          exportToken: true
+
+      # ansible_ssh_private_key_file est passé explicitement en -e (chemin
+      # absolu), pas via group_vars/all.yml : {{ playbook_dir }} ne se résout
+      # pas de façon fiable pour une variable de connexion (résolue très tôt,
+      # avant la 1ère connexion SSH). fetch-ssh-key.sh est sourcé pour que
+      # VAULT_TOKEN (déjà exporté par le step précédent) et le nettoyage
+      # (trap EXIT) restent dans le même shell que les 3 playbooks.
+      - name: Run Ansible playbooks
+        working-directory: ansible
+        shell: bash
+        # community.hashi_vault.vault_kv2_get (group_vars/all.yml) fait son
+        # propre login AppRole via lookup('env', 'VAULT_ROLE_ID'/'VAULT_SECRET_ID')
+        # — le step précédent (hashicorp/vault-action) ne les exporte jamais
+        # dans l'environnement shell (il consomme les secrets directement via
+        # roleId:/secretId:, n'exporte que VAULT_TOKEN).
+        env:
+          VAULT_ROLE_ID: ${{ secrets.VAULT_CI_ROLE_ID }}
+          VAULT_SECRET_ID: ${{ secrets.VAULT_CI_SECRET_ID }}
+        run: |
+          set -euo pipefail
+          source ./fetch-ssh-key.sh "${{ matrix.org }}"
+
+          INV="../terraform/clusters/${{ matrix.org }}/ansible-inventory/inventory-${{ matrix.org }}.ini"
+          KEY_PATH="$(pwd)/.ssh_key_${{ matrix.org }}"
+
+          # group_vars/<nom-groupe>.yml (server.yml, agent.yml) ne se
+          # résolvait pas correctement quand l'inventaire est situé loin de
+          # ansible/group_vars/ — Ansible cherche group_vars/ à côté du
+          # fichier d'inventaire. Un symlink recréé à chaque run aligne les
+          # deux emplacements sans dupliquer le contenu ni le committer.
+          ln -sfn "$(pwd)/group_vars" "../terraform/clusters/${{ matrix.org }}/ansible-inventory/group_vars"
+
+          ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/01-base.yml
+          ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/02-dependencies.yml
+          ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/03-cluster-init.yml
+
+  # --- Retrait de worker (drain + désinscription AVANT destruction VM) ---
+
   remove-worker:
-    needs: [detect, remove-worker-build-image]
+    needs: [detect, build-ansible-image]
     if: needs.detect.outputs.orgs_remove_worker != '[]'
     runs-on: self-hosted
     # Tout le job tourne dans le conteneur Docker Ansible (kubectl + vault +
-    # ansible-playbook au même endroit), même pattern que le job "configure"
-    # de ansible-configure-clusters.yml — le login Vault (step suivant) y
+    # ansible-playbook au même endroit) : le login Vault (step suivant) y
     # tourne aussi, le token n'est jamais exposé à plat sur le runner.
     container:
-      image: ${{ needs.remove-worker-build-image.outputs.image }}
+      image: ${{ needs.build-ansible-image.outputs.image }}
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -286,14 +446,18 @@ jobs:
 
       # Échoue net (exit 1) si le plan révèle une destruction de MASTER —
       # garde-fou volontaire, jamais de retrait de master automatisé (risque
-      # de perte de quorum etcd, hors scope de ce mécanisme).
+      # de perte de quorum etcd, hors scope de ce mécanisme). nodes_to_remove
+      # provient du même script que celui déjà utilisé par le job detect
+      # (detect-cluster-plan.sh) — recalculé ici car le plan a pu changer
+      # entre le run de detect et celui-ci (autre commit entre-temps), et
+      # pour rester la source de vérité au plus près de l'apply réel.
       - name: Detect which worker(s) are about to be destroyed
         id: nodes
         working-directory: terraform/clusters/${{ matrix.org }}
         env:
           TF_VAR_vault_role_id: ${{ secrets.VAULT_CI_ROLE_ID }}
           TF_VAR_vault_secret_id: ${{ secrets.VAULT_CI_SECRET_ID }}
-        run: bash ../../scripts/detect-worker-removal.sh
+        run: bash ../../scripts/detect-cluster-plan.sh
 
       # drain/delete-node sont des opérations API Kubernetes pures, faites en
       # kubectl direct (pas Ansible) ; rke2-killall/rke2-uninstall se font en
@@ -325,9 +489,6 @@ jobs:
           KEY_PATH="$(pwd)/.ssh_key_${ORG}"
           LIMIT="$(echo "${NODES}" | jq -r 'join(",")')"
 
-          # Même fix que ansible-configure-clusters.yml : group_vars/ doit
-          # être au même niveau que le fichier d'inventaire pour que
-          # group_vars/agent.yml se résolve correctement.
           ln -sfn "$(pwd)/group_vars" "../terraform/clusters/${ORG}/ansible-inventory/group_vars"
 
           ansible-playbook -i "$INV" -e cluster_org="${ORG}" -e ansible_ssh_private_key_file="${KEY_PATH}" --limit "${LIMIT}" playbooks/04-remove-node.yml
@@ -375,10 +536,12 @@ jobs:
         org: ${{ fromJson(needs.detect.outputs.orgs_delete || '[]') }}
     steps:
       # L'admin a déjà supprimé lui-même clusters/<org>/ dans le commit qui a
-      # déclenché ce run (c'est cette disparition que detect a repérée).
-      # Terraform a encore besoin du code du cluster pour le destroy — on
-      # checkout donc le commit PRÉCÉDENT, celui où le dossier existait
-      # encore.
+      # déclenché ce run (c'est cette disparition que detect a repérée, par
+      # comparaison d'état Vault vs repo — pas par diff de commit). Terraform
+      # a encore besoin du code du cluster pour le destroy — on checkout donc
+      # le commit PRÉCÉDENT, celui où le dossier existait encore (seul usage
+      # restant de github.event.before : retrouver le code à détruire, pas
+      # décider s'il faut le détruire).
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.before }}

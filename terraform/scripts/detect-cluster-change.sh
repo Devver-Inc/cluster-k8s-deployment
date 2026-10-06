@@ -1,42 +1,35 @@
 #!/usr/bin/env bash
-# Détecte, pour CHAQUE org ayant changé dans ce push, laquelle des 4 actions
-# du workflow "2 - Proxmox" en découle : create-cluster, delete-cluster,
-# add-worker, remove-worker. Remplace le workflow_dispatch manuel
-# (org+action) : l'admin édite un fichier et pushe, ce script déduit l'action.
+# PRÉSÉLECTION légère avant confirmation par terraform plan
+# (detect-cluster-plan.sh) — ce script ne décide JAMAIS seul d'une action,
+# il réduit seulement l'espace de recherche : quelles orgs valent la peine
+# d'un terraform plan (coûteux : init + plan par org) à ce push précis.
 #
-# - Dossier terraform/clusters/<org>/ apparu dans ce push (absent du commit
-#   précédent) ET structure Vault déjà créée (list-vault-orgs.sh) ->
-#   action=create-cluster. Si la structure Vault n'existe pas encore, l'org
-#   n'est PAS prête (secrets pas saisis) : ignorée, cohérent avec le flux
-#   "1 - Vault" qui doit tourner en premier.
-# - Dossier disparu entre les deux commits -> action=delete-cluster.
-# - Dossier présent aux deux commits, mais additional_workers_count a changé
-#   dans values.auto.tfvars (diff TEXTUEL du fichier entre les deux commits —
-#   contrairement à create/delete, cette valeur n'a pas d'équivalent "état
-#   réel" externe à comparer, c'est une donnée purement locale au repo) :
-#     - valeur augmentée -> action=add-worker
-#     - valeur diminuée  -> action=remove-worker
+# - orgs_delete : comparaison d'ÉTAT RÉEL (orgs connues de Vault —
+#   list-vault-orgs.sh — mais absentes du repo actuel) : pas de terraform
+#   plan possible ici, le dossier a disparu. Fiable par construction, pas de
+#   dépendance à un diff de commit pour CETTE détection précise (seul le job
+#   delete-cluster, une fois déclenché, a encore besoin de github.event.before
+#   pour retrouver le code à détruire — un problème différent : "où trouver
+#   le code", pas "faut-il détruire").
+# - orgs_to_plan : candidates pour un terraform plan, union de :
+#     - dossiers terraform/clusters/<org>/ apparus dans ce push (présents
+#       après, absents avant) ;
+#     - orgs présentes aux deux commits dont un fichier .tf ou
+#       values.auto.tfvars a changé.
+#   Le job appelant doit ensuite lancer detect-cluster-plan.sh pour CHACUNE
+#   de ces orgs afin de confirmer l'action réelle (create-cluster,
+#   add-worker, remove-worker, ou aucune si le plan ne révèle rien — ex: un
+#   dossier apparu mais sans structure Vault encore créée, donc le plan
+#   échouerait de toute façon faute de credentials VM valides : filtré par
+#   le job lui-même, pas par ce script).
 #
-# Pas de risque de destruction croisée comme terraform/vault/ (un seul
-# for_each partagé par toutes les orgs) : chaque org a son propre state
-# Terraform isolé, donc un checkout incomplet n'affecte jamais les autres
-# orgs via ce mécanisme — contrairement à detect-org-change.sh, pas besoin de
-# limiter à un seul changement à la fois.
-#
-# Sortie en 4 listes JSON séparées (pas un seul mélange à filtrer côté YAML)
-# pour que chaque job du workflow consomme directement la sienne en matrix,
-# sans entrée "fantôme" pour une org qui ne le concerne pas.
-#
-# Prérequis : CLI `vault` installé, VAULT_ADDR + VAULT_TOKEN déjà exportés,
+# Prérequis : VAULT_ADDR + VAULT_TOKEN déjà exportés (pour list-vault-orgs.sh),
 # jq installé, git avec un historique suffisant (fetch-depth >= 2 en CI).
 #
 # Usage : ./detect-cluster-change.sh <sha_avant> <sha_apres>
-# Sortie ($GITHUB_OUTPUT si dispo, sinon stdout), une liste JSON de strings
-# (orgs) par action, ex: ["prod"] ou [] si aucune org concernée :
-#   orgs_create=[...]
-#   orgs_delete=[...]
-#   orgs_add_worker=[...]
-#   orgs_remove_worker=[...]
+# Sortie ($GITHUB_OUTPUT si dispo, sinon stdout) :
+#   orgs_delete=<JSON>   — orgs à détruire, ex: ["prod"]
+#   orgs_to_plan=<JSON>  — orgs candidates à un terraform plan, ex: ["prod","staging"]
 set -euo pipefail
 
 before_sha="${1:?Usage: detect-cluster-change.sh <sha_avant> <sha_apres>}"
@@ -47,18 +40,9 @@ repo_root="$(cd "${script_dir}/../.." && pwd)"
 cd "${repo_root}"
 
 vault_orgs=$(bash "${script_dir}/list-vault-orgs.sh" | sort)
-
-orgs_before=$(git ls-tree -d --name-only "${before_sha}" -- terraform/clusters/ 2>/dev/null \
-  | sed 's#^terraform/clusters/##' | grep -v '^_template$' | grep -v '^$' | sort || true)
-orgs_after=$(git ls-tree -d --name-only "${after_sha}" -- terraform/clusters/ 2>/dev/null \
-  | sed 's#^terraform/clusters/##' | grep -v '^_template$' | grep -v '^$' | sort || true)
-
-appeared=$(comm -13 <(printf '%s\n' "${orgs_before}") <(printf '%s\n' "${orgs_after}") | grep -v '^$' || true)
-disappeared=$(comm -23 <(printf '%s\n' "${orgs_before}") <(printf '%s\n' "${orgs_after}") | grep -v '^$' || true)
-present_both=$(comm -12 <(printf '%s\n' "${orgs_before}") <(printf '%s\n' "${orgs_after}") | grep -v '^$' || true)
+repo_orgs_after=$(bash "${script_dir}/list-orgs.sh" | jq -r '.[]' | sort)
 
 to_json_array() {
-  # $1 : une liste d'orgs séparées par des \n (peut être vide)
   if [[ -z "$1" ]]; then
     echo "[]"
   else
@@ -66,73 +50,35 @@ to_json_array() {
   fi
 }
 
-orgs_create_lines=""
-orgs_delete_lines=""
-orgs_add_worker_lines=""
-orgs_remove_worker_lines=""
+# --- orgs_delete : état réel (Vault) vs état réel (repo), pas de diff git ---
+orgs_delete_lines=$(comm -23 <(printf '%s\n' "${vault_orgs}") <(printf '%s\n' "${repo_orgs_after}") | grep -v '^$' || true)
+orgs_delete="$(to_json_array "${orgs_delete_lines}")"
 
-if [[ -n "${appeared}" ]]; then
-  while IFS= read -r org; do
-    [[ -z "${org}" ]] && continue
-    if echo "${vault_orgs}" | grep -qx "${org}"; then
-      echo "detect-cluster-change.sh: org=${org} action=create-cluster" >&2
-      orgs_create_lines="${orgs_create_lines}${org}"$'\n'
-    else
-      echo "detect-cluster-change.sh: org=${org} nouvelle mais pas de structure Vault encore — ignorée (lancer 1 - Vault d'abord)." >&2
-    fi
-  done <<< "${appeared}"
-fi
+# --- orgs_to_plan : dossiers apparus + fichiers .tf/tfvars modifiés -------
+orgs_before=$(git ls-tree -d --name-only "${before_sha}" -- terraform/clusters/ 2>/dev/null \
+  | sed 's#^terraform/clusters/##' | grep -v '^_template$' | grep -v '^$' | sort || true)
+orgs_after=$(git ls-tree -d --name-only "${after_sha}" -- terraform/clusters/ 2>/dev/null \
+  | sed 's#^terraform/clusters/##' | grep -v '^_template$' | grep -v '^$' | sort || true)
 
-if [[ -n "${disappeared}" ]]; then
-  while IFS= read -r org; do
-    [[ -z "${org}" ]] && continue
-    echo "detect-cluster-change.sh: org=${org} action=delete-cluster" >&2
-    orgs_delete_lines="${orgs_delete_lines}${org}"$'\n'
-  done <<< "${disappeared}"
-fi
+appeared=$(comm -13 <(printf '%s\n' "${orgs_before}") <(printf '%s\n' "${orgs_after}") | grep -v '^$' || true)
 
-if [[ -n "${present_both}" ]]; then
-  while IFS= read -r org; do
-    [[ -z "${org}" ]] && continue
-    tfvars_path="terraform/clusters/${org}/values.auto.tfvars"
+changed_files=$(git diff --name-only "${before_sha}" "${after_sha}" -- 'terraform/clusters/*' 2>/dev/null || true)
+orgs_with_changed_files=$(printf '%s\n' "${changed_files}" \
+  | grep -E '\.tf$|values\.auto\.tfvars$' \
+  | sed -E 's#^terraform/clusters/([^/]+)/.*#\1#' \
+  | grep -v '^_template$' | grep -v '^$' | sort -u || true)
 
-    before_count=$(git show "${before_sha}:${tfvars_path}" 2>/dev/null \
-      | grep -oP '^additional_workers_count\s*=\s*\K\d+' || echo "")
-    after_count=$(git show "${after_sha}:${tfvars_path}" 2>/dev/null \
-      | grep -oP '^additional_workers_count\s*=\s*\K\d+' || echo "")
+orgs_to_plan_lines=$(printf '%s\n%s\n' "${appeared}" "${orgs_with_changed_files}" | grep -v '^$' | sort -u || true)
+orgs_to_plan="$(to_json_array "${orgs_to_plan_lines}")"
 
-    if [[ -z "${before_count}" || -z "${after_count}" ]]; then
-      continue
-    fi
-    if [[ "${after_count}" -gt "${before_count}" ]]; then
-      echo "detect-cluster-change.sh: org=${org} action=add-worker (${before_count} -> ${after_count})" >&2
-      orgs_add_worker_lines="${orgs_add_worker_lines}${org}"$'\n'
-    elif [[ "${after_count}" -lt "${before_count}" ]]; then
-      echo "detect-cluster-change.sh: org=${org} action=remove-worker (${before_count} -> ${after_count})" >&2
-      orgs_remove_worker_lines="${orgs_remove_worker_lines}${org}"$'\n'
-    fi
-  done <<< "${present_both}"
-fi
-
-orgs_create="$(to_json_array "${orgs_create_lines%$'\n'}")"
-orgs_delete="$(to_json_array "${orgs_delete_lines%$'\n'}")"
-orgs_add_worker="$(to_json_array "${orgs_add_worker_lines%$'\n'}")"
-orgs_remove_worker="$(to_json_array "${orgs_remove_worker_lines%$'\n'}")"
-
-if [[ "${orgs_create}" == "[]" && "${orgs_delete}" == "[]" && "${orgs_add_worker}" == "[]" && "${orgs_remove_worker}" == "[]" ]]; then
-  echo "detect-cluster-change.sh: aucune action détectée." >&2
-fi
+echo "detect-cluster-change.sh: orgs_delete=${orgs_delete} orgs_to_plan=${orgs_to_plan}" >&2
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   {
-    echo "orgs_create=${orgs_create}"
     echo "orgs_delete=${orgs_delete}"
-    echo "orgs_add_worker=${orgs_add_worker}"
-    echo "orgs_remove_worker=${orgs_remove_worker}"
+    echo "orgs_to_plan=${orgs_to_plan}"
   } >> "${GITHUB_OUTPUT}"
 else
-  echo "orgs_create=${orgs_create}"
   echo "orgs_delete=${orgs_delete}"
-  echo "orgs_add_worker=${orgs_add_worker}"
-  echo "orgs_remove_worker=${orgs_remove_worker}"
+  echo "orgs_to_plan=${orgs_to_plan}"
 fi

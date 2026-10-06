@@ -14,8 +14,9 @@ pip install ansible
 ansible-galaxy collection install -r requirements.yml
 ```
 
-En **CI** (workflow `3 - Ansible`), ces prérequis sont fournis par l'image
-`runner-images/ansible/` — voir [Isolation](#isolation--exécution-en-conteneur).
+En **CI** (jobs `configure`/`remove-worker` du workflow `2 - Proxmox`), ces
+prérequis sont fournis par l'image `runner-images/ansible/` — voir
+[Isolation](#isolation--exécution-en-conteneur).
 
 ## Secrets et inventaire
 
@@ -130,20 +131,21 @@ système (`04-remove-node.yml`).
 ## Isolation (exécution en conteneur)
 
 Contrairement à Terraform (qui reste à plat sur le runner, voir
-`terraform/DEPLOY.md`), **tout le job `configure`** du workflow `3 - Ansible`
-— y compris le login Vault (`hashicorp/vault-action`) et
-`fetch-ssh-key.sh` — tourne dans un conteneur Docker custom défini par
+`terraform/DEPLOY.md`), **les jobs `configure` et `remove-worker`** du
+workflow `2 - Proxmox` — y compris le login Vault (`hashicorp/vault-action`)
+et `fetch-ssh-key.sh`/`fetch-kubeconfig.sh` — tournent dans un conteneur
+Docker custom défini par
 [`runner-images/ansible/Dockerfile`](../runner-images/ansible/Dockerfile)
 (`container:` au niveau du job dans le YAML). Le runner self-hosted lui-même
-n'a besoin que de Docker installé — ni Ansible, ni le CLI `vault`, ni la
-collection `community.hashi_vault` ne sont requis à plat.
+n'a besoin que de Docker installé — ni Ansible, ni le CLI `vault`/`kubectl`,
+ni la collection `community.hashi_vault` ne sont requis à plat.
 
 L'image contient : `ansible-core`, la collection `community.hashi_vault`, le
-CLI `vault`, `git` (pour `actions/checkout`) et un client SSH. Elle est
-buildée par le job `build-image` et poussée sur GHCR
+CLI `vault`, `kubectl`, `git` (pour `actions/checkout`) et un client SSH.
+Elle est buildée par le job `build-ansible-image` et poussée sur GHCR
 (`ghcr.io/<owner>/<repo>/ansible-runner`, package privé rattaché au repo),
 **taguée par la ligne `# IMAGE_VERSION=` en tête du
-[`Dockerfile`](../runner-images/ansible/Dockerfile)** — `build-image`
+[`Dockerfile`](../runner-images/ansible/Dockerfile)** — `build-ansible-image`
 réutilise l'image si ce tag existe déjà sur GHCR, et ne rebuild/push que si
 cette version a été incrémentée manuellement (à faire à chaque changement du
 `Dockerfile` ou de `ansible/requirements.yml`). Un registry est nécessaire
@@ -158,22 +160,27 @@ le conteneur en fin de job.
 
 ## Pipeline CI
 
-[`ansible-configure-clusters.yml`](../.github/workflows/ansible-configure-clusters.yml)
-(« **3 - Ansible: configurer les clusters** » dans l'onglet Actions) —
-automatique, déclenché par un push touchant `ansible/` ou
-`runner-images/ansible/` sur `main`. Volontairement **indépendant de
-Terraform/Vault** (aucun trigger sur `terraform/clusters/**`) : un nouveau
-cluster créé côté Terraform n'a pas Ansible appliqué automatiquement, il faut
-soit lancer les playbooks en local (voir ci-dessus), soit
-attendre/provoquer un prochain push sur `ansible/`.
+Ansible n'a plus de workflow dédié — il est entièrement intégré au workflow
+[`proxmox-deploy-cluster.yml`](../.github/workflows/proxmox-deploy-cluster.yml)
+(« **2 - Proxmox: apply/destroy cluster** » dans l'onglet Actions), déclenché
+par push sur `terraform/clusters/**`, `ansible/**` ou
+`runner-images/ansible/**`.
 
-Trois jobs : `build-image` (build/réutilisation de l'image conteneur, voir
-[Isolation](#isolation--exécution-en-conteneur)), `list-clusters` (scan de
-`terraform/clusters/<org>/` via `terraform/scripts/list-orgs.sh`), puis
-`configure` qui applique les 3 playbooks à **tous** les clusters existants
-d'un coup (un job par org via une `matrix` GitHub Actions) — sans confirmation
-manuelle, accepté parce que les playbooks sont **idempotents** : les rejouer
-sur un cluster déjà configuré ne doit rien casser.
+Après un `terraform apply` réussi pour **create-cluster** ou **add-worker**,
+le job `configure` s'enchaîne **automatiquement** (`needs:` sur le job
+Terraform correspondant) et applique les 3 playbooks
+(`01-base.yml`/`02-dependencies.yml`/`03-cluster-init.yml`) — mais
+**uniquement sur l'org concernée par ce push**, jamais sur tous les clusters
+existants (contrairement à l'ancien workflow séparé, qui reconfigurait
+systématiquement toutes les orgs à chaque modification sous `ansible/`).
+Accepté sans confirmation manuelle parce que les playbooks sont
+**idempotents** : les rejouer sur un cluster déjà configuré ne doit rien
+casser — c'est d'ailleurs ce qui se produit naturellement si `ansible/**`
+change seul (sans modification Terraform) : tant qu'aucune org n'a de
+`create-cluster`/`add-worker` détecté pour ce push, le job `configure` ne se
+déclenche sur aucune org (il n'y a alors rien à reconfigurer automatiquement
+— relancer manuellement en local, voir ci-dessus, ou via
+`workflow_dispatch`).
 
 ## Prochaines étapes
 

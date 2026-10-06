@@ -12,7 +12,7 @@
 #
 # hosts: agent (jamais server) — ce mécanisme ne gère QUE le retrait de
 # workers, jamais de masters (risque de perte de quorum etcd, hors scope,
-# cf. terraform/scripts/detect-worker-removal.sh qui fait déjà échouer le
+# cf. terraform/scripts/detect-cluster-plan.sh qui fait déjà échouer le
 # pipeline en amont si un master est visé).
 #
 # Usage :

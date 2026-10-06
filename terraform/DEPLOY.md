@@ -162,12 +162,25 @@ Deux workflows, tous deux pilotés par **push** — l'admin modifie le code
    après un échec), mais n'est plus le chemin principal.
 2. [`proxmox-deploy-cluster.yml`](../.github/workflows/proxmox-deploy-cluster.yml)
    (« **2 - Proxmox: apply/destroy cluster** » dans l'onglet Actions) —
-   déclenché **automatiquement par push** sur `terraform/clusters/**`. Un job
-   `detect` compare l'état du repo avant/après le push (dossiers
-   apparus/disparus, `additional_workers_count` changé dans
-   `values.auto.tfvars`) pour en déduire l'une de 4 actions, chacune son
-   propre job : `create-cluster`, `delete-cluster`, `add-worker`,
-   `remove-worker` (voir détail plus bas).
+   déclenché **automatiquement par push** sur `terraform/clusters/**`,
+   `ansible/**` ou `runner-images/ansible/**`. Absorbe aussi la
+   configuration Ansible (RKE2) : plus de workflow séparé pour ça. Un job
+   `detect` confirme par un vrai `terraform plan` par org candidate (pas un
+   simple diff de commits — fiable et idempotent par construction, voir
+   note plus bas) l'une de 4 actions, chacune son propre job :
+   `create-cluster`, `delete-cluster`, `add-worker`, `remove-worker` (voir
+   détail plus bas). Après un `create-cluster`/`add-worker` réussi, le job
+   `configure` enchaîne **automatiquement** les playbooks Ansible — mais
+   uniquement sur l'org concernée par ce push, jamais sur tous les clusters
+   existants (voir [`ansible/README.md`](../ansible/README.md#pipeline-ci)).
+
+La détection `create-cluster`/`add-worker`/`remove-worker` lit l'état **réel**
+(`terraform plan`) plutôt qu'un diff entre deux commits consécutifs — même
+leçon que celle déjà tirée sur `detect-org-change.sh` : un diff à 2 commits
+peut rater un delta si un run échoue entre deux push, ou si plusieurs push
+s'enchaînent rapidement. Une présélection légère (diff de commit, sur quels
+fichiers ont changé) réduit juste le nombre d'orgs à planifier à chaque run,
+sans jamais décider seule d'une action.
 
 La structure Vault créée automatiquement contient encore les placeholders du
 template (`vm_password=CHANGE_ME`, etc.) — `create-cluster` peut se
@@ -198,9 +211,8 @@ workflows eux-mêmes) :
   à faire sur le runner au-delà de l'installation.
 - **`git`** — utilisé par le step `Remove cluster folder and push` (suppression
   d'un cluster, voir plus bas) pour committer et pousser sur `main`.
-- **`docker`** — utilisé par le workflow `3 - Ansible: configurer les
-  clusters` et par le job `remove-worker` de `2 - Proxmox` (voir
-  `ansible/README.md`) pour builder/exécuter l'image
+- **`docker`** — utilisé par les jobs `configure` et `remove-worker` de
+  `2 - Proxmox` (voir `ansible/README.md`) pour builder/exécuter l'image
   `runner-images/ansible/Dockerfile` dans laquelle tourne tout le job (Ansible
   + `kubectl` installés uniquement dans l'image, pas sur le runner).
   L'utilisateur qui fait tourner le service `actions-runner` doit pouvoir
@@ -214,8 +226,8 @@ workflows eux-mêmes) :
 > dossier de travail du repo (les credentials injectés en variables d'env ne
 > survivent pas au job qui les exporte, mais rien d'autre n'est assaini
 > automatiquement). Accepté comme tel pour Terraform/Vault (repo privé, équipe
-> restreinte de confiance). Le workflow `3 - Ansible` et le job `remove-worker`
-> de `2 - Proxmox` font exception : tout le job (y compris le login Vault)
+> restreinte de confiance). Les jobs `configure` et `remove-worker` de
+> `2 - Proxmox` font exception : tout le job (y compris le login Vault)
 > tourne dans le conteneur `runner-images/ansible/` (`container:` dans le
 > YAML) — voir `ansible/README.md#isolation`.
 
@@ -290,7 +302,8 @@ disparu dans le commit qui a déclenché tout ça.
 
 - Valeur **augmentée** → job `add-worker` : `terraform apply` ajoute
   directement la nouvelle VM (`for_each` sur une clé `worker-N`, aucune
-  autre ressource touchée).
+  autre ressource touchée), puis le job `configure` enchaîne
+  **automatiquement** les playbooks Ansible sur cette org uniquement.
 - Valeur **diminuée** → job `remove-worker` : voir
   [`ansible/README.md#retrait-dun-worker`](../ansible/README.md#retrait-dun-worker)
   pour la séquence complète (drain Kubernetes, désinstallation RKE2 via SSH,
@@ -298,6 +311,11 @@ disparu dans le commit qui a déclenché tout ça.
   explicitement sans rien détruire si le plan révèle un retrait de
   **master** (`node_count` modifié plutôt que `additional_workers_count`) —
   intervention manuelle requise dans ce cas.
+
+**Création initiale d'un cluster** (après le premier `create-cluster` réussi,
+secrets valides) : même enchaînement automatique — le job `configure`
+démarre dès que `create-cluster` a réussi, applique les 3 playbooks sur
+cette org uniquement.
 
 > **Permission requise** : les commits automatiques (inventaire Ansible
 > régénéré) utilisent le `GITHUB_TOKEN` par défaut du job pour pousser sur

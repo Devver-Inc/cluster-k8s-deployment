@@ -45,7 +45,7 @@ ansible_user: "{{ cluster_secrets.vm_user }}"
 # tout (pas d'erreur "fichier introuvable", juste un Permission denied SSH
 # qui ne pointe jamais vers la vraie cause). Le chemin absolu est passé
 # explicitement en -e ansible_ssh_private_key_file=... par le workflow CI
-# (voir .github/workflows/ansible-configure-clusters.yml) et par
+# (voir .github/workflows/proxmox-deploy-cluster.yml, job configure) et par
 # ansible/README.md pour un run manuel — cohérent avec fetch-ssh-key.sh qui
 # écrit ce même fichier juste avant.
 # become: true est défini au niveau de chaque play dans les playbooks
