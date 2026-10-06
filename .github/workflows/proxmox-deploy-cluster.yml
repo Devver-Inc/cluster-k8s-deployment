@@ -365,6 +365,14 @@ jobs:
       matrix:
         org: ${{ fromJson(needs.detect.outputs.orgs_configure || '[]') }}
     steps:
+      # Voir le commentaire équivalent dans remove-worker : actions/checkout@v4
+      # ne pose safe.directory que pour la durée de son propre step (HOME
+      # temporaire) — un futur step git dans ce job (dans un autre
+      # working-directory) en aurait besoin aussi.
+      - name: Trust the shared self-hosted workspace (git safe.directory)
+        shell: bash
+        run: git config --global --add safe.directory '*'
+
       - uses: actions/checkout@v4
 
       # Même AppRole terraform-ci que Terraform (voir terraform/README.md) —
@@ -461,6 +469,21 @@ jobs:
       matrix:
         org: ${{ fromJson(needs.detect.outputs.orgs_remove_worker || '[]') }}
     steps:
+      # actions/checkout@v4 pose bien safe.directory pour le repo racine,
+      # mais seulement via un HOME temporaire valable pour la durée de ce
+      # step (voir ses logs : "Temporarily overriding HOME=...") — les
+      # steps suivants tournent dans un autre shell où ce HOME n'existe
+      # plus, donc git ne reconnaît plus le repo comme sûr pour eux
+      # ("fatal: not in a git directory" sur le step de commit, qui tourne
+      # dans terraform/clusters/<org>/, un sous-dossier du même repo).
+      # Indépendant de l'UID du conteneur (root ici) : le workspace est
+      # partagé entre des runs/jobs successifs qui n'ont pas forcément le
+      # même propriétaire (ex: ce job tourne en root, le job
+      # remove-worker-fix-ownership qui suit tourne en tant que gh_runner).
+      - name: Trust the shared self-hosted workspace (git safe.directory)
+        shell: bash
+        run: git config --global --add safe.directory '*'
+
       - uses: actions/checkout@v4
 
       - name: Vault auth + fetch B2 credentials
