@@ -52,6 +52,7 @@ on:
     branches: [main]
     paths:
       - "terraform/clusters/**"
+      - "terraform/scripts/**"
       - "ansible/**"
       - "runner-images/ansible/**"
       - ".github/workflows/proxmox-deploy-cluster.yml"
