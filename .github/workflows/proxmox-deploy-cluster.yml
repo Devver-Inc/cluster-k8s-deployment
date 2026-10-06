@@ -127,10 +127,16 @@ jobs:
 
           # GITHUB_OUTPUT est défini dans l'environnement du runner : sans
           # "env -u", le script écrirait ses résultats dans ce fichier au
-          # lieu de stdout, et cet eval capturerait une sortie vide (bug
-          # réel rencontré : "unbound variable" sur orgs_to_plan).
-          eval "$(env -u GITHUB_OUTPUT bash terraform/scripts/detect-cluster-change.sh "${{ github.event.before }}" "${{ github.sha }}")"
-          # eval ci-dessus définit orgs_delete= et orgs_to_plan= dans ce shell.
+          # lieu de stdout (bug réel rencontré : "unbound variable"). Et
+          # jamais via eval "$(...)" : un JSON comme ["prod"] contient des
+          # crochets que bash interprète comme une classe de caractères glob
+          # lors du parsing par eval, corrompant la valeur ([ "prod" ]
+          # devient [prod], donc JSON invalide côté fromJson()). On capture
+          # donc la sortie ligne par ligne sans jamais la ré-évaluer comme du
+          # shell.
+          change_output="$(env -u GITHUB_OUTPUT bash terraform/scripts/detect-cluster-change.sh "${{ github.event.before }}" "${{ github.sha }}")"
+          orgs_delete="$(echo "${change_output}" | grep '^orgs_delete=' | cut -d= -f2-)"
+          orgs_to_plan="$(echo "${change_output}" | grep '^orgs_to_plan=' | cut -d= -f2-)"
 
           orgs_create="[]"
           orgs_add_worker="[]"
@@ -140,8 +146,8 @@ jobs:
             cd "terraform/clusters/${org}"
             terraform init -backend-config=backend.hcl -input=false >&2
 
-            eval "$(env -u GITHUB_OUTPUT bash ../../scripts/detect-cluster-plan.sh)"
-            # eval ci-dessus définit action= et nodes_to_remove= pour cette org.
+            plan_output="$(env -u GITHUB_OUTPUT bash ../../scripts/detect-cluster-plan.sh)"
+            action="$(echo "${plan_output}" | grep '^action=' | cut -d= -f2-)"
 
             case "${action}" in
               create-cluster)
