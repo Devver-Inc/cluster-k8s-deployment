@@ -4,7 +4,7 @@
 # pas (voir .github/workflows/proxmox-deploy-cluster.yml, qui extrait cette
 # ligne par grep pour construire le tag de l'image).
 #
-# IMAGE_VERSION=13
+# IMAGE_VERSION=14
 #
 # Incrémenter cette version à chaque changement de ce Dockerfile ou de
 # ansible/requirements.yml, pour forcer un rebuild/push.
@@ -40,9 +40,12 @@ ENV HOME=/tmp
 # tail (chaque step est un docker exec indépendant), donc un ENTRYPOINT
 # custom ne peut pas ajouter cette entrée au démarrage : le workflow le
 # fait lui-même, en tout premier step de chaque job concerné (voir
-# proxmox-deploy-cluster.yml) — /etc/passwd group-writable ici permet à ce
-# step, qui ne tourne pas en root, d'y écrire.
-RUN chmod g+w /etc/passwd
+# proxmox-deploy-cluster.yml). chmod g+w seul ne suffit pas : le GID
+# fourni par --user (vars.RUNNER_GID, variable, pas fixé à l'image) n'est
+# pas forcément membre du groupe propriétaire de /etc/passwd (root/GID 0)
+# — seul o+w (monde) fonctionne pour un GID arbitraire inconnu au build.
+# Risque limité : image jetable de CI, jamais exposée en dehors du job.
+RUN chmod o+w /etc/passwd
 
 ARG VAULT_VERSION=1.17.6
 # Alignée sur rke2_version dans ansible/group_vars/all.yml (v1.30.5+rke2r1) —
