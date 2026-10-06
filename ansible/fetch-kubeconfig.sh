@@ -35,8 +35,11 @@ if [[ -z "${VAULT_TOKEN:-}" ]]; then
   export VAULT_TOKEN
 fi
 
-fetched_kubeconfig=$(vault kv get -field=kubeconfig "devver-infra-deployment/${org}")
-if [[ -z "${fetched_kubeconfig}" ]]; then
+# -format=json + jq -r plutôt que `vault kv get -field=` : voir le
+# commentaire équivalent dans fetch-ssh-key.sh — comportement peu fiable
+# observé en CI (image Docker, CLI vault 1.17.6) sur une valeur multi-ligne.
+fetched_kubeconfig=$(vault kv get -format=json "devver-infra-deployment/${org}" | jq -r '.data.data.kubeconfig')
+if [[ -z "${fetched_kubeconfig}" || "${fetched_kubeconfig}" == "null" ]]; then
   echo "fetch-kubeconfig.sh: échec de lecture de kubeconfig sur devver-infra-deployment/${org} (cluster pas encore initialisé ?)." >&2
   return 1 2>/dev/null || true
 fi

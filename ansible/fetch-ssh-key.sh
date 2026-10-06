@@ -46,8 +46,16 @@ if [[ -z "${VAULT_TOKEN:-}" ]]; then
   export VAULT_TOKEN
 fi
 
-fetched_key=$(vault kv get -field=ssh_private_key "devver-infra-deployment/${org}")
-if [[ -z "${fetched_key}" ]]; then
+# -format=json + jq -r plutôt que `vault kv get -field=` : ce dernier s'est
+# révélé peu fiable en CI (image Docker, CLI vault 1.17.6) sur une valeur
+# multi-ligne — la clé lue ressortait aplatie en une seule ligne malgré une
+# valeur Vault confirmée correcte (7 lignes, BEGIN/END valides) via le même
+# CLI en local (vault 2.0.4). -format=json restitue la valeur comme une
+# chaîne JSON échappée (\n explicites), que jq -r décode de façon fiable
+# indépendamment du rendu texte du CLI — élimine la dépendance à ce
+# comportement non documenté plutôt que de la contourner au cas par cas.
+fetched_key=$(vault kv get -format=json "devver-infra-deployment/${org}" | jq -r '.data.data.ssh_private_key')
+if [[ -z "${fetched_key}" || "${fetched_key}" == "null" ]]; then
   echo "fetch-ssh-key.sh: échec de lecture de ssh_private_key sur devver-infra-deployment/${org}." >&2
   return 1 2>/dev/null || true
 fi
