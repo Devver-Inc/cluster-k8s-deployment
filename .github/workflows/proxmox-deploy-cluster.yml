@@ -522,6 +522,14 @@ jobs:
         env:
           VAULT_ROLE_ID: ${{ secrets.VAULT_CI_ROLE_ID }}
           VAULT_SECRET_ID: ${{ secrets.VAULT_CI_SECRET_ID }}
+          # GitHub Actions container: force HOME=/github/home dans l'env de
+          # CHAQUE step (visible dans "docker create ... -e HOME=/github/home"),
+          # qui écrase l'ENV HOME=/tmp du Dockerfile — /github/home n'est pas
+          # writable par l'UID non-root (options: --user), donc
+          # ansible-playbook échoue dès son tmp local ("Permission denied:
+          # /github/home/.ansible/tmp/..."). Redéfinir HOME ici, au niveau du
+          # step, prime sur celui du conteneur.
+          HOME: /tmp
         run: |
           set -euo pipefail
           ORG="${{ matrix.org }}"

@@ -21,10 +21,15 @@
 # playbook SSH — découvert en CI : "terraform: not found" sans ce binaire).
 #
 # Les jobs configure/remove-worker passent désormais container: options:
-# --user ${{ vars.RUNNER_UID }}:${{ vars.RUNNER_GID }} (voir le workflow) —
-# un UID arbitraire sans entrée dans /etc/passwd du conteneur ne résout pas
-# $HOME automatiquement, d'où ENV HOME=/tmp ci-dessous (répertoire déjà
-# accessible en écriture par tout UID sur une image Linux standard).
+# --user ${{ vars.RUNNER_UID }}:${{ vars.RUNNER_GID }} (voir le workflow).
+# ENV HOME=/tmp ci-dessous est systématiquement écrasé par GitHub Actions
+# container:, qui force HOME=/github/home dans l'env de CHAQUE step
+# ("docker create ... -e HOME=/github/home", confirmé en CI) — /github/home
+# n'est pas writable par un UID non-root, donc ansible-playbook échouait
+# sur son tmp local ("Permission denied: /github/home/.ansible/tmp/...").
+# La vraie fixation se fait désormais côté workflow (env: HOME: /tmp au
+# niveau du step, qui prime sur celui du conteneur) — gardé ici seulement
+# pour un usage local/manuel de cette image, hors GitHub Actions.
 FROM python:3.12-slim
 
 ENV HOME=/tmp
