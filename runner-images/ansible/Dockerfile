@@ -4,7 +4,7 @@
 # pas (voir .github/workflows/proxmox-deploy-cluster.yml, qui extrait cette
 # ligne par grep pour construire le tag de l'image).
 #
-# IMAGE_VERSION=12
+# IMAGE_VERSION=13
 #
 # Incrémenter cette version à chaque changement de ce Dockerfile ou de
 # ansible/requirements.yml, pour forcer un rebuild/push.
@@ -28,6 +28,21 @@
 FROM python:3.12-slim
 
 ENV HOME=/tmp
+
+# Les jobs configure/remove-worker passent container: options: --user
+# ${{ vars.RUNNER_UID }}:${{ vars.RUNNER_GID }} (voir le workflow) — un UID
+# arbitraire (1000) sans entrée dans /etc/passwd fait échouer ssh-keygen
+# ("No user exists for uid 1000", exit 255) même sur un fichier de clé
+# parfaitement valide : ssh-keygen fait un lookup NSS strict sur l'UID
+# courant, contrairement à bash/jq/vault/kubectl/ansible qui n'en ont pas
+# besoin — découvert en CI, après ENV HOME=/tmp seul (insuffisant).
+# GitHub Actions container: lance toujours le conteneur avec --entrypoint
+# tail (chaque step est un docker exec indépendant), donc un ENTRYPOINT
+# custom ne peut pas ajouter cette entrée au démarrage : le workflow le
+# fait lui-même, en tout premier step de chaque job concerné (voir
+# proxmox-deploy-cluster.yml) — /etc/passwd group-writable ici permet à ce
+# step, qui ne tourne pas en root, d'y écrire.
+RUN chmod g+w /etc/passwd
 
 ARG VAULT_VERSION=1.17.6
 # Alignée sur rke2_version dans ansible/group_vars/all.yml (v1.30.5+rke2r1) —

@@ -46,31 +46,23 @@ if [[ -z "${VAULT_TOKEN:-}" ]]; then
   export VAULT_TOKEN
 fi
 
-# -format=json + jq -r plutôt que `vault kv get -field=` : ce dernier s'est
-# révélé peu fiable en CI (image Docker, CLI vault 1.17.6) sur une valeur
-# multi-ligne — la clé lue ressortait aplatie en une seule ligne malgré une
-# valeur Vault confirmée correcte (7 lignes, BEGIN/END valides) via le même
-# CLI en local (vault 2.0.4). -format=json restitue la valeur comme une
-# chaîne JSON échappée (\n explicites), que jq -r décode de façon fiable
-# indépendamment du rendu texte du CLI — élimine la dépendance à ce
-# comportement non documenté plutôt que de la contourner au cas par cas.
+# -format=json + jq -r plutôt que `vault kv get -field=` : plus robuste
+# face au rendu texte du CLI sur une valeur multi-ligne (comportement non
+# documenté, jamais confirmé coupable mais sans inconvénient à éviter) —
+# la valeur transite en JSON échappé, décodée de façon déterministe par
+# jq. La cause réelle des échecs précédents était ailleurs : ssh-keygen,
+# avec un UID conteneur arbitraire sans entrée /etc/passwd (container:
+# options: --user), échoue ("No user exists for uid <N>", exit 255) même
+# sur une clé structurellement valide — corrigé côté workflow (step
+# "Ensure /etc/passwd entry for current UID"), pas ici.
 fetched_key=$(vault kv get -format=json "devver-infra-deployment/${org}" | jq -r '.data.data.ssh_private_key')
 if [[ -z "${fetched_key}" || "${fetched_key}" == "null" ]]; then
   echo "fetch-ssh-key.sh: échec de lecture de ssh_private_key sur devver-infra-deployment/${org}." >&2
   return 1 2>/dev/null || true
 fi
 
-# DEBUG TEMPORAIRE (à retirer une fois le format d'aplatissement identifié) :
-# longueur et nombre de lignes seulement, jamais le contenu de la clé.
-echo "fetch-ssh-key.sh: DEBUG longueur=${#fetched_key} lignes=$(printf '%s' "${fetched_key}" | wc -l)" >&2
-
 printf '%s\n' "${fetched_key}" > "${key_file}"
 chmod 600 "${key_file}"
-
-# DEBUG TEMPORAIRE : état réel du fichier écrit sur disque.
-echo "fetch-ssh-key.sh: DEBUG key_file=${key_file} taille=$(wc -c < "${key_file}") lignes_fichier=$(wc -l < "${key_file}") perms=$(ls -l "${key_file}")" >&2
-echo "fetch-ssh-key.sh: DEBUG premiere_ligne_len=$(head -1 "${key_file}" | wc -c) derniere_ligne_len=$(tail -1 "${key_file}" | wc -c)" >&2
-ssh-keygen -lf "${key_file}" >&2 2>&1 || echo "fetch-ssh-key.sh: DEBUG ssh-keygen exit=$?" >&2
 
 # Garde-fou : une clé collée dans un champ web non multi-ligne (UI Vault)
 # perd ses retours à la ligne internes et devient une seule ligne plate —

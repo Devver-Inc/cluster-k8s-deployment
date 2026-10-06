@@ -455,6 +455,26 @@ jobs:
         shell: bash
         run: git config --global --add safe.directory '*'
 
+      # GitHub Actions container: lance toujours le conteneur avec
+      # --entrypoint tail (voir "Initialize containers" dans les logs), donc
+      # un ENTRYPOINT custom dans le Dockerfile ne s'exécute jamais — chaque
+      # step est un `docker exec` indépendant qui ne repasse par aucun
+      # entrypoint. Il faut donc garantir l'entrée /etc/passwd ici, en tout
+      # premier step de chaque job avec options: --user. Sans elle,
+      # ssh-keygen échoue ("No user exists for uid <N>", exit 255) même sur
+      # une clé parfaitement valide — ssh-keygen fait un lookup NSS strict
+      # sur l'UID courant, contrairement à bash/jq/vault/kubectl/ansible qui
+      # n'en ont pas besoin (découvert en CI : le drain/fetch-ssh-key.sh
+      # lisaient bien une clé structurellement correcte, confirmée par un
+      # diagnostic temporaire, mais ssh-keygen -lf échouait quand même).
+      # /etc/passwd est rendu group-writable au build (voir Dockerfile).
+      - name: Ensure /etc/passwd entry for current UID (required by ssh-keygen)
+        shell: bash
+        run: |
+          if ! getent passwd "$(id -u)" >/dev/null 2>&1; then
+            echo "ci:x:$(id -u):$(id -g):CI runner:/tmp:/bin/bash" >> /etc/passwd
+          fi
+
       - uses: actions/checkout@v4
 
       - name: Vault auth + fetch B2 credentials
