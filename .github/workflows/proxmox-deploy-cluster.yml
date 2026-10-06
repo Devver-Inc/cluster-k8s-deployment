@@ -486,13 +486,20 @@ jobs:
         run: |
           set -euo pipefail
           ORG="${{ matrix.org }}"
+          # NODES (clés Terraform, ex: worker-1) sert pour l'inventaire
+          # Ansible/--limit. NODE_HOSTNAMES (hostnames réels, ex:
+          # devver-k8s-test-vr-w-1) sert pour kubectl, qui identifie les
+          # nodes par leur hostname système — kubectl drain/delete node avec
+          # la clé Terraform échoue avec "not found" malgré un node présent
+          # sous son vrai nom.
           NODES='${{ steps.nodes.outputs.nodes_to_remove }}'
+          NODE_HOSTNAMES='${{ steps.nodes.outputs.node_hostnames_to_remove }}'
 
           source ./fetch-kubeconfig.sh "${ORG}"
 
-          echo "${NODES}" | jq -r '.[]' | while IFS= read -r node; do
-            echo "Draining ${node}..."
-            kubectl drain "${node}" --ignore-daemonsets --delete-emptydir-data --force --timeout=120s
+          echo "${NODE_HOSTNAMES}" | jq -r '.[]' | while IFS= read -r hostname; do
+            echo "Draining ${hostname}..."
+            kubectl drain "${hostname}" --ignore-daemonsets --delete-emptydir-data --force --timeout=120s
           done
 
           source ./fetch-ssh-key.sh "${ORG}"
@@ -504,9 +511,9 @@ jobs:
 
           ansible-playbook -i "$INV" -e cluster_org="${ORG}" -e ansible_ssh_private_key_file="${KEY_PATH}" --limit "${LIMIT}" playbooks/04-remove-node.yml
 
-          echo "${NODES}" | jq -r '.[]' | while IFS= read -r node; do
-            echo "Deleting node ${node} from the cluster..."
-            kubectl delete node "${node}"
+          echo "${NODE_HOSTNAMES}" | jq -r '.[]' | while IFS= read -r hostname; do
+            echo "Deleting node ${hostname} from the cluster..."
+            kubectl delete node "${hostname}"
           done
 
       # Seulement si tout ce qui précède a réussi : la VM du worker peut

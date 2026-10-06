@@ -26,7 +26,14 @@
 # Sortie ($GITHUB_OUTPUT si dispo, sinon stdout) :
 #   action=<create-cluster|add-worker|remove-worker|none>
 #   nodes_to_remove=<JSON> — uniquement pertinent si action=remove-worker,
-#     ex: ["worker-3"], sinon [].
+#     clés Terraform du for_each (ex: ["worker-3"]) — c'est aussi le nom
+#     d'hôte utilisé par l'inventaire Ansible, donc directement utilisable
+#     avec ansible-playbook --limit.
+#   node_hostnames_to_remove=<JSON> — mêmes nodes, mais HOSTNAMES RÉELS
+#     (ex: ["devver-k8s-prod-w-3"]), tels qu'utilisables par kubectl
+#     drain/delete node — le node Kubernetes est identifié par son hostname
+#     système, pas par la clé Terraform (kubectl drain "worker-3" échoue
+#     avec "not found" alors que le node existe bien sous son vrai nom).
 # Échoue (exit 1) si une destruction de master est détectée dans le plan.
 set -euo pipefail
 
@@ -74,6 +81,17 @@ workers_removed=$(echo "${plan_json}" | jq -c '[
   | .index
 ]')
 
+# Hostnames réels (ex: devver-k8s-test-vr-w-1) des mêmes nodes — nécessaires
+# pour kubectl, qui identifie les nodes par hostname système, pas par la clé
+# Terraform (.index) utilisée côté inventaire Ansible.
+node_hostnames_removed=$(echo "${plan_json}" | jq -c '[
+  .resource_changes[]?
+  | select(.type == "proxmox_virtual_environment_vm")
+  | select(.address | contains(".worker_only["))
+  | select(.change.actions == ["delete"])
+  | .change.before.name
+]')
+
 # Ordre de priorité : un premier apply crée à la fois tous les masters ET
 # les workers_only éventuels (node_count + additional_workers_count d'un
 # coup) — create-cluster prime donc sur add-worker si les deux sont présents
@@ -81,25 +99,31 @@ workers_removed=$(echo "${plan_json}" | jq -c '[
 if [[ -n "${masters_created}" ]]; then
   action="create-cluster"
   nodes_to_remove="[]"
+  node_hostnames_to_remove="[]"
 elif [[ -n "${workers_created}" ]]; then
   action="add-worker"
   nodes_to_remove="[]"
+  node_hostnames_to_remove="[]"
 elif [[ "${workers_removed}" != "[]" ]]; then
   action="remove-worker"
   nodes_to_remove="${workers_removed}"
+  node_hostnames_to_remove="${node_hostnames_removed}"
 else
   action="none"
   nodes_to_remove="[]"
+  node_hostnames_to_remove="[]"
 fi
 
-echo "detect-cluster-plan.sh: action=${action} nodes_to_remove=${nodes_to_remove}" >&2
+echo "detect-cluster-plan.sh: action=${action} nodes_to_remove=${nodes_to_remove} node_hostnames_to_remove=${node_hostnames_to_remove}" >&2
 
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   {
     echo "action=${action}"
     echo "nodes_to_remove=${nodes_to_remove}"
+    echo "node_hostnames_to_remove=${node_hostnames_to_remove}"
   } >> "${GITHUB_OUTPUT}"
 else
   echo "action=${action}"
   echo "nodes_to_remove=${nodes_to_remove}"
+  echo "node_hostnames_to_remove=${node_hostnames_to_remove}"
 fi
