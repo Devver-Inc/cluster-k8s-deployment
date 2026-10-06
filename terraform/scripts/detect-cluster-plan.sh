@@ -40,7 +40,7 @@ plan_json=$(terraform show -json "${plan_file}")
 masters_destroyed=$(echo "${plan_json}" | jq -r '
   .resource_changes[]?
   | select(.type == "proxmox_virtual_environment_vm")
-  | select(.address | startswith("proxmox_virtual_environment_vm.mixed["))
+  | select(.address | contains(".mixed["))
   | select(.change.actions == ["delete"])
   | .index
 ')
@@ -53,7 +53,7 @@ fi
 masters_created=$(echo "${plan_json}" | jq -r '
   .resource_changes[]?
   | select(.type == "proxmox_virtual_environment_vm")
-  | select(.address | startswith("proxmox_virtual_environment_vm.mixed["))
+  | select(.address | contains(".mixed["))
   | select(.change.actions == ["create"])
   | .index
 ')
@@ -61,7 +61,7 @@ masters_created=$(echo "${plan_json}" | jq -r '
 workers_created=$(echo "${plan_json}" | jq -r '
   .resource_changes[]?
   | select(.type == "proxmox_virtual_environment_vm")
-  | select(.address | startswith("proxmox_virtual_environment_vm.worker_only["))
+  | select(.address | contains(".worker_only["))
   | select(.change.actions == ["create"])
   | .index
 ')
@@ -69,7 +69,7 @@ workers_created=$(echo "${plan_json}" | jq -r '
 workers_removed=$(echo "${plan_json}" | jq -c '[
   .resource_changes[]?
   | select(.type == "proxmox_virtual_environment_vm")
-  | select(.address | startswith("proxmox_virtual_environment_vm.worker_only["))
+  | select(.address | contains(".worker_only["))
   | select(.change.actions == ["delete"])
   | .index
 ]')
