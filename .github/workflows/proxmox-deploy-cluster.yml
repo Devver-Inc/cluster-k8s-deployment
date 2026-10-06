@@ -539,6 +539,17 @@ jobs:
             git push origin HEAD:main
           fi
 
+      # .terraform/ créé par ce job est écrit avec l'UID du conteneur — le
+      # prochain job qui checkoute le repo à plat sur le runner (ex: detect)
+      # n'a pas les droits pour le nettoyer/recréer, et actions/checkout
+      # échoue avec EACCES. Nettoyé ici, dans le même conteneur qui l'a créé
+      # (donc avec les bons droits), toujours exécuté même si un step
+      # précédent a échoué.
+      - name: Clean up .terraform (avoid permission conflicts with the next checkout)
+        if: always()
+        working-directory: terraform/clusters/${{ matrix.org }}
+        run: rm -rf .terraform .terraform.lock.hcl
+
   # --- Suppression complète de cluster ------------------------------------
   # Comportement inchangé : aucun drain ajouté. Tout le cluster disparaît de
   # toute façon, un drain n'apporte aucune valeur fonctionnelle ici et
