@@ -4,7 +4,7 @@
 # pas (voir .github/workflows/proxmox-deploy-cluster.yml, qui extrait cette
 # ligne par grep pour construire le tag de l'image).
 #
-# IMAGE_VERSION=10
+# IMAGE_VERSION=11
 #
 # Incrémenter cette version à chaque changement de ce Dockerfile ou de
 # ansible/requirements.yml, pour forcer un rebuild/push.
@@ -41,11 +41,11 @@ RUN apt-get update \
         jq \
     && curl -fsSL -o /tmp/vault.zip \
         "https://releases.hashicorp.com/vault/${VAULT_VERSION}/vault_${VAULT_VERSION}_linux_amd64.zip" \
-    && unzip /tmp/vault.zip -d /usr/local/bin \
+    && unzip -o /tmp/vault.zip -d /usr/local/bin \
     && rm /tmp/vault.zip \
     && curl -fsSL -o /tmp/terraform.zip \
         "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip" \
-    && unzip /tmp/terraform.zip -d /usr/local/bin \
+    && unzip -o /tmp/terraform.zip -d /usr/local/bin \
     && rm /tmp/terraform.zip \
     && curl -fsSL -o /usr/local/bin/kubectl \
         "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
