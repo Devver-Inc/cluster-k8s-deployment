@@ -158,6 +158,20 @@ filesystem éphémère du conteneur, jamais sur le disque persistant du runner,
 et reste nettoyée en sortie de shell (`trap EXIT`) en plus de disparaître avec
 le conteneur en fin de job.
 
+Le Dockerfile n'a pas de directive `USER` : le conteneur tourne en root. Une
+tentative antérieure de le faire tourner avec l'UID du runner (`container:
+options: --user`) a été abandonnée après une cascade de bugs propres à un
+UID sans entrée `/etc/passwd`/home dir réel (`ssh-keygen`, le tmp local
+d'Ansible, son `ControlPath` SSH par défaut — tous consultent NSS ou `$HOME`
+d'une façon que GitHub Actions perturbe en forçant `HOME=/github/home` sur
+chaque step). Les fichiers que ce conteneur écrit dans le workspace partagé
+du runner self-hosted appartiennent donc à root côté hôte — un job à plat
+dédié (`remove-worker-fix-ownership`/`configure-fix-ownership`, voir
+`proxmox-deploy-cluster.yml`) les rend à l'utilisateur du runner juste
+après, via `sudo chown -R` (prérequis sudoers documenté dans
+`terraform/DEPLOY.md`), plutôt que de chasser chaque outil sensible à l'UID
+à l'intérieur du conteneur.
+
 ## Pipeline CI
 
 Ansible n'a plus de workflow dédié — il est entièrement intégré au workflow

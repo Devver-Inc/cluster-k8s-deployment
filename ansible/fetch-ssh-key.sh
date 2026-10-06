@@ -48,13 +48,11 @@ fi
 
 # -format=json + jq -r plutôt que `vault kv get -field=` : plus robuste
 # face au rendu texte du CLI sur une valeur multi-ligne (comportement non
-# documenté, jamais confirmé coupable mais sans inconvénient à éviter) —
-# la valeur transite en JSON échappé, décodée de façon déterministe par
-# jq. La cause réelle des échecs précédents était ailleurs : ssh-keygen,
-# avec un UID conteneur arbitraire sans entrée /etc/passwd (container:
-# options: --user), échoue ("No user exists for uid <N>", exit 255) même
-# sur une clé structurellement valide — corrigé côté workflow (step
-# "Ensure /etc/passwd entry for current UID"), pas ici.
+# documenté). Pistée à tort comme cause d'un échec ssh-keygen en CI — la
+# vraie cause était ailleurs (un UID conteneur arbitraire sans entrée
+# /etc/passwd, approche depuis abandonnée, voir runner-images/ansible/
+# Dockerfile) : ce flag n'a jamais aplati de clé, mais -format=json+jq
+# reste une amélioration de robustesse légitime, donc conservé.
 fetched_key=$(vault kv get -format=json "devver-infra-deployment/${org}" | jq -r '.data.data.ssh_private_key')
 if [[ -z "${fetched_key}" || "${fetched_key}" == "null" ]]; then
   echo "fetch-ssh-key.sh: échec de lecture de ssh_private_key sur devver-infra-deployment/${org}." >&2

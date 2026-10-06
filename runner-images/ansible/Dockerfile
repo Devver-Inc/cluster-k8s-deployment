@@ -4,7 +4,7 @@
 # pas (voir .github/workflows/proxmox-deploy-cluster.yml, qui extrait cette
 # ligne par grep pour construire le tag de l'image).
 #
-# IMAGE_VERSION=14
+# IMAGE_VERSION=15
 #
 # Incrémenter cette version à chaque changement de ce Dockerfile ou de
 # ansible/requirements.yml, pour forcer un rebuild/push.
@@ -20,37 +20,18 @@
 # son init/plan/apply dans ce même conteneur, entre le drain Kubernetes et le
 # playbook SSH — découvert en CI : "terraform: not found" sans ce binaire).
 #
-# Les jobs configure/remove-worker passent désormais container: options:
-# --user ${{ vars.RUNNER_UID }}:${{ vars.RUNNER_GID }} (voir le workflow).
-# ENV HOME=/tmp ci-dessous est systématiquement écrasé par GitHub Actions
-# container:, qui force HOME=/github/home dans l'env de CHAQUE step
-# ("docker create ... -e HOME=/github/home", confirmé en CI) — /github/home
-# n'est pas writable par un UID non-root, donc ansible-playbook échouait
-# sur son tmp local ("Permission denied: /github/home/.ansible/tmp/...").
-# La vraie fixation se fait désormais côté workflow (env: HOME: /tmp au
-# niveau du step, qui prime sur celui du conteneur) — gardé ici seulement
-# pour un usage local/manuel de cette image, hors GitHub Actions.
+# Aucune directive USER : le conteneur tourne en root (comportement Docker
+# standard). Volontaire — voir .github/workflows/proxmox-deploy-cluster.yml
+# (jobs configure/remove-worker) pour le pourquoi : faire tourner ce
+# conteneur avec un UID non-root injecté depuis l'extérieur (container:
+# options: --user) a été tenté puis abandonné, après une cascade de bugs
+# NSS/$HOME (ssh-keygen, tmp local Ansible, son ControlPath SSH...) propres
+# à un UID sans entrée /etc/passwd/home dir réel. Les fichiers que ce
+# conteneur écrit dans le workspace partagé du runner self-hosted
+# appartiennent donc à root côté hôte — remis à l'UID du runner juste après
+# par un job à plat dédié (voir remove-worker-fix-ownership/
+# configure-fix-ownership dans le workflow), pas en modifiant ce conteneur.
 FROM python:3.12-slim
-
-ENV HOME=/tmp
-
-# Les jobs configure/remove-worker passent container: options: --user
-# ${{ vars.RUNNER_UID }}:${{ vars.RUNNER_GID }} (voir le workflow) — un UID
-# arbitraire (1000) sans entrée dans /etc/passwd fait échouer ssh-keygen
-# ("No user exists for uid 1000", exit 255) même sur un fichier de clé
-# parfaitement valide : ssh-keygen fait un lookup NSS strict sur l'UID
-# courant, contrairement à bash/jq/vault/kubectl/ansible qui n'en ont pas
-# besoin — découvert en CI, après ENV HOME=/tmp seul (insuffisant).
-# GitHub Actions container: lance toujours le conteneur avec --entrypoint
-# tail (chaque step est un docker exec indépendant), donc un ENTRYPOINT
-# custom ne peut pas ajouter cette entrée au démarrage : le workflow le
-# fait lui-même, en tout premier step de chaque job concerné (voir
-# proxmox-deploy-cluster.yml). chmod g+w seul ne suffit pas : le GID
-# fourni par --user (vars.RUNNER_GID, variable, pas fixé à l'image) n'est
-# pas forcément membre du groupe propriétaire de /etc/passwd (root/GID 0)
-# — seul o+w (monde) fonctionne pour un GID arbitraire inconnu au build.
-# Risque limité : image jetable de CI, jamais exposée en dehors du job.
-RUN chmod o+w /etc/passwd
 
 ARG VAULT_VERSION=1.17.6
 # Alignée sur rke2_version dans ansible/group_vars/all.yml (v1.30.5+rke2r1) —

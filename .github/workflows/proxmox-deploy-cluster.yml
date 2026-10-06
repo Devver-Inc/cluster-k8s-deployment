@@ -417,6 +417,19 @@ jobs:
           ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/02-dependencies.yml
           ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/03-cluster-init.yml
 
+  # Même raison que remove-worker-fix-ownership ci-dessous : configure
+  # tourne en root dans son conteneur (symlink group_vars, group_vars
+  # résolu, inventaire éventuellement modifié...), ce job à plat reprend
+  # possession du workspace pour l'UID du runner avant le prochain job qui
+  # checkoute à plat.
+  configure-fix-ownership:
+    needs: [detect, configure]
+    if: always() && needs.detect.outputs.orgs_configure != '[]'
+    runs-on: self-hosted
+    steps:
+      - name: Reclaim workspace ownership for the runner user
+        run: sudo chown -R "$(id -u):$(id -g)" "${GITHUB_WORKSPACE}"
+
   # --- Retrait de worker (drain + désinscription AVANT destruction VM) ---
 
   remove-worker:
@@ -427,54 +440,27 @@ jobs:
     # ansible-playbook au même endroit) : le login Vault (step suivant) y
     # tourne aussi, le token n'est jamais exposé à plat sur le runner.
     #
-    # options: --user : sans directive USER dans le Dockerfile, le conteneur
-    # tourne en root par défaut — tout fichier écrit dans le workspace
-    # partagé du runner self-hosted (.terraform/, clé SSH temporaire,
-    # symlink group_vars...) appartenait alors à root côté hôte, bloquant le
-    # prochain job à plat (ex: detect) qui tente de les nettoyer/écraser via
-    # actions/checkout ("EACCES: permission denied"). RUNNER_UID/RUNNER_GID
-    # (variables de repo, Settings > Actions > Variables) doivent correspondre
-    # à l'utilisateur système qui fait tourner le service actions-runner —
-    # voir terraform/DEPLOY.md.
+    # Le conteneur tourne en ROOT (pas de directive USER dans le Dockerfile,
+    # pas d'options: --user ici) — volontaire : un UID non-root injecté
+    # depuis l'extérieur casse en cascade tout outil qui consulte NSS/$HOME
+    # (ssh-keygen, ansible-playbook tmp, son ControlPath SSH...), chacun
+    # découvert et corrigé au cas par cas en CI avant d'abandonner cette
+    # approche (voir l'historique git de ce fichier). Le conteneur écrit
+    # donc ses fichiers (.terraform/, clé SSH temporaire...) en root dans le
+    # workspace partagé du runner self-hosted — remis à l'UID gh_runner
+    # juste après par le job remove-worker-fix-ownership ci-dessous, qui
+    # tourne à plat (container: est une clé de job, impossible de mélanger
+    # un step conteneurisé et un step à plat dans le même job).
     container:
       image: ${{ needs.build-ansible-image.outputs.image }}
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
-      options: --user ${{ vars.RUNNER_UID }}:${{ vars.RUNNER_GID }}
     strategy:
       fail-fast: false
       matrix:
         org: ${{ fromJson(needs.detect.outputs.orgs_remove_worker || '[]') }}
     steps:
-      # Un UID non-root dans le conteneur peut déclencher "detected dubious
-      # ownership" si le workspace a été laissé par un run précédent sous un
-      # autre propriétaire (ex: root, avant l'ajout de ce fix) — safe.directory
-      # '*' désamorce ce garde-fou git (>= 2.35.2) avant tout checkout.
-      - name: Trust the shared self-hosted workspace (git safe.directory)
-        shell: bash
-        run: git config --global --add safe.directory '*'
-
-      # GitHub Actions container: lance toujours le conteneur avec
-      # --entrypoint tail (voir "Initialize containers" dans les logs), donc
-      # un ENTRYPOINT custom dans le Dockerfile ne s'exécute jamais — chaque
-      # step est un `docker exec` indépendant qui ne repasse par aucun
-      # entrypoint. Il faut donc garantir l'entrée /etc/passwd ici, en tout
-      # premier step de chaque job avec options: --user. Sans elle,
-      # ssh-keygen échoue ("No user exists for uid <N>", exit 255) même sur
-      # une clé parfaitement valide — ssh-keygen fait un lookup NSS strict
-      # sur l'UID courant, contrairement à bash/jq/vault/kubectl/ansible qui
-      # n'en ont pas besoin (découvert en CI : le drain/fetch-ssh-key.sh
-      # lisaient bien une clé structurellement correcte, confirmée par un
-      # diagnostic temporaire, mais ssh-keygen -lf échouait quand même).
-      # /etc/passwd est rendu group-writable au build (voir Dockerfile).
-      - name: Ensure /etc/passwd entry for current UID (required by ssh-keygen)
-        shell: bash
-        run: |
-          if ! getent passwd "$(id -u)" >/dev/null 2>&1; then
-            echo "ci:x:$(id -u):$(id -g):CI runner:/tmp:/bin/bash" >> /etc/passwd
-          fi
-
       - uses: actions/checkout@v4
 
       - name: Vault auth + fetch B2 credentials
@@ -522,23 +508,8 @@ jobs:
         env:
           VAULT_ROLE_ID: ${{ secrets.VAULT_CI_ROLE_ID }}
           VAULT_SECRET_ID: ${{ secrets.VAULT_CI_SECRET_ID }}
-          # GitHub Actions container: force HOME=/github/home dans l'env de
-          # CHAQUE step (visible dans "docker create ... -e HOME=/github/home"),
-          # qui écrase l'ENV HOME=/tmp du Dockerfile — /github/home n'est pas
-          # writable par l'UID non-root (options: --user). Rediriger HOME
-          # vers /tmp seul s'est révélé insuffisant à son tour : /tmp peut
-          # contenir des résidus créés en root PENDANT LE BUILD de l'image
-          # (ansible-galaxy tourne avec $HOME=/tmp à ce moment-là aussi),
-          # bloquant ensuite l'UID runtime non-root sur /tmp/.ansible
-          # ("Permission denied"). ANSIBLE_LOCAL_TEMP (exporté ci-dessous,
-          # chemin relatif au workspace) pointe plutôt vers un
-          # sous-répertoire de working-directory: ansible, déjà possédé par
-          # l'UID runtime — élimine toute dépendance à l'état de /tmp au
-          # moment du build.
         run: |
           set -euo pipefail
-          export ANSIBLE_LOCAL_TEMP="$(pwd)/.ansible-tmp"
-          mkdir -p "${ANSIBLE_LOCAL_TEMP}"
           ORG="${{ matrix.org }}"
           # NODES (clés Terraform, ex: worker-1) sert pour l'inventaire
           # Ansible/--limit. NODE_HOSTNAMES (hostnames réels, ex:
@@ -593,16 +564,24 @@ jobs:
             git push origin HEAD:main
           fi
 
-      # .terraform/ créé par ce job est écrit avec l'UID du conteneur — le
-      # prochain job qui checkoute le repo à plat sur le runner (ex: detect)
-      # n'a pas les droits pour le nettoyer/recréer, et actions/checkout
-      # échoue avec EACCES. Nettoyé ici, dans le même conteneur qui l'a créé
-      # (donc avec les bons droits), toujours exécuté même si un step
-      # précédent a échoué.
-      - name: Clean up .terraform (avoid permission conflicts with the next checkout)
-        if: always()
-        working-directory: terraform/clusters/${{ matrix.org }}
-        run: rm -rf .terraform .terraform.lock.hcl
+  # Tout ce que remove-worker écrit dans le workspace (.terraform/, clé SSH
+  # temporaire déjà nettoyée par son propre trap EXIT, inventaire committé...)
+  # appartient à root côté hôte, puisque le conteneur ci-dessus tourne en
+  # root. Job à plat (pas de container:), qui reprend possession du
+  # workspace pour l'UID du runner — sinon le prochain job qui checkoute à
+  # plat (ex: detect) échoue avec EACCES. if: always() : s'exécute même si
+  # remove-worker (ou l'un de ses steps) a échoué, pour que le workspace
+  # soit toujours sain avant le run suivant. Remplace l'ancien step "Clean
+  # up .terraform", qui ne couvrait que ce seul fichier — ce job-ci couvre
+  # tout le workspace, pour tout type de fichier qu'un futur playbook/script
+  # pourrait créer sans qu'on l'ait anticipé.
+  remove-worker-fix-ownership:
+    needs: [detect, remove-worker]
+    if: always() && needs.detect.outputs.orgs_remove_worker != '[]'
+    runs-on: self-hosted
+    steps:
+      - name: Reclaim workspace ownership for the runner user
+        run: sudo chown -R "$(id -u):$(id -g)" "${GITHUB_WORKSPACE}"
 
   # --- Suppression complète de cluster ------------------------------------
   # Comportement inchangé : aucun drain ajouté. Tout le cluster disparaît de

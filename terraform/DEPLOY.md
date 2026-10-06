@@ -218,6 +218,21 @@ workflows eux-mêmes) :
   L'utilisateur qui fait tourner le service `actions-runner` doit pouvoir
   lancer `docker build`/`docker run` (membre du groupe `docker`, ou
   équivalent).
+- **Règle `sudo` sans mot de passe pour `chown`** — l'image Docker ci-dessus
+  n'a pas de directive `USER` (tourne en root : voir `ansible/README.md#isolation`
+  pour le pourquoi, après plusieurs approches avec un UID non-root
+  abandonnées). Les fichiers qu'elle écrit dans le workspace partagé du
+  runner (`.terraform/`, inventaire, etc.) appartiennent donc à root côté
+  hôte — les jobs `remove-worker-fix-ownership`/`configure-fix-ownership`
+  (voir `proxmox-deploy-cluster.yml`) les rendent à l'utilisateur du runner
+  juste après, via `sudo chown -R`. Ajouter sur la machine runner
+  (`sudo visudo`), en remplaçant `gh_runner` par l'utilisateur réel du
+  service `actions-runner` et `<chemin>` par le dossier `_work` du runner :
+  ```
+  gh_runner ALL=(ALL) NOPASSWD: /bin/chown -R gh_runner\:gh_runner <chemin>/_work/*
+  ```
+  Vérifiable isolément : `sudo -n chown -R gh_runner:gh_runner
+  <chemin>` doit réussir sans prompt de mot de passe.
 
 > **Isolation** : les jobs `runs-on: self-hosted` s'exécutent **directement sur
 > la machine du runner**, pas dans un conteneur éphémère — contrairement aux
