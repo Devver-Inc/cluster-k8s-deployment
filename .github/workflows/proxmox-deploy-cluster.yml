@@ -426,16 +426,35 @@ jobs:
     # Tout le job tourne dans le conteneur Docker Ansible (kubectl + vault +
     # ansible-playbook au même endroit) : le login Vault (step suivant) y
     # tourne aussi, le token n'est jamais exposé à plat sur le runner.
+    #
+    # options: --user : sans directive USER dans le Dockerfile, le conteneur
+    # tourne en root par défaut — tout fichier écrit dans le workspace
+    # partagé du runner self-hosted (.terraform/, clé SSH temporaire,
+    # symlink group_vars...) appartenait alors à root côté hôte, bloquant le
+    # prochain job à plat (ex: detect) qui tente de les nettoyer/écraser via
+    # actions/checkout ("EACCES: permission denied"). RUNNER_UID/RUNNER_GID
+    # (variables de repo, Settings > Actions > Variables) doivent correspondre
+    # à l'utilisateur système qui fait tourner le service actions-runner —
+    # voir terraform/DEPLOY.md.
     container:
       image: ${{ needs.build-ansible-image.outputs.image }}
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
+      options: --user ${{ vars.RUNNER_UID }}:${{ vars.RUNNER_GID }}
     strategy:
       fail-fast: false
       matrix:
         org: ${{ fromJson(needs.detect.outputs.orgs_remove_worker || '[]') }}
     steps:
+      # Un UID non-root dans le conteneur peut déclencher "detected dubious
+      # ownership" si le workspace a été laissé par un run précédent sous un
+      # autre propriétaire (ex: root, avant l'ajout de ce fix) — safe.directory
+      # '*' désamorce ce garde-fou git (>= 2.35.2) avant tout checkout.
+      - name: Trust the shared self-hosted workspace (git safe.directory)
+        shell: bash
+        run: git config --global --add safe.directory '*'
+
       - uses: actions/checkout@v4
 
       - name: Vault auth + fetch B2 credentials

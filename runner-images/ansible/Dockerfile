@@ -4,7 +4,7 @@
 # pas (voir .github/workflows/proxmox-deploy-cluster.yml, qui extrait cette
 # ligne par grep pour construire le tag de l'image).
 #
-# IMAGE_VERSION=11
+# IMAGE_VERSION=12
 #
 # Incrémenter cette version à chaque changement de ce Dockerfile ou de
 # ansible/requirements.yml, pour forcer un rebuild/push.
@@ -19,7 +19,15 @@
 # playbooks/04-remove-node.yml) et terraform (le job remove-worker fait tout
 # son init/plan/apply dans ce même conteneur, entre le drain Kubernetes et le
 # playbook SSH — découvert en CI : "terraform: not found" sans ce binaire).
+#
+# Les jobs configure/remove-worker passent désormais container: options:
+# --user ${{ vars.RUNNER_UID }}:${{ vars.RUNNER_GID }} (voir le workflow) —
+# un UID arbitraire sans entrée dans /etc/passwd du conteneur ne résout pas
+# $HOME automatiquement, d'où ENV HOME=/tmp ci-dessous (répertoire déjà
+# accessible en écriture par tout UID sur une image Linux standard).
 FROM python:3.12-slim
+
+ENV HOME=/tmp
 
 ARG VAULT_VERSION=1.17.6
 # Alignée sur rke2_version dans ansible/group_vars/all.yml (v1.30.5+rke2r1) —
