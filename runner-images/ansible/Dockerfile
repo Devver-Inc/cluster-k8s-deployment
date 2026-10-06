@@ -1,9 +1,10 @@
-# Image du job "3 - Ansible: configurer les clusters" — buildée et poussée
-# sur GHCR par le job build-image, réutilisée tant que la version ci-dessous
-# ne change pas (voir .github/workflows/ansible-configure-clusters.yml, qui
-# extrait cette ligne par grep pour construire le tag de l'image).
+# Image des jobs "configure" et "remove-worker" du workflow "2 - Proxmox:
+# apply/destroy cluster" — buildée et poussée sur GHCR par le job
+# build-ansible-image, réutilisée tant que la version ci-dessous ne change
+# pas (voir .github/workflows/proxmox-deploy-cluster.yml, qui extrait cette
+# ligne par grep pour construire le tag de l'image).
 #
-# IMAGE_VERSION=9
+# IMAGE_VERSION=10
 #
 # Incrémenter cette version à chaque changement de ce Dockerfile ou de
 # ansible/requirements.yml, pour forcer un rebuild/push.
@@ -12,10 +13,12 @@
 # (hashicorp/vault-action tourne dans ce même conteneur) : Ansible + la
 # collection community.hashi_vault, le CLI vault (pour fetch-ssh-key.sh), git
 # (actions/checkout), un client SSH (connexion aux VMs cibles), jq (utilisé
-# par terraform/scripts/list-orgs.sh dans le job list-clusters) et kubectl
+# par terraform/scripts/list-orgs.sh dans le job list-clusters), kubectl
 # (utilisé par le job remove-worker pour drainer/désinscrire un node avant
 # que Terraform ne détruise sa VM — voir fetch-kubeconfig.sh et
-# playbooks/04-remove-node.yml).
+# playbooks/04-remove-node.yml) et terraform (le job remove-worker fait tout
+# son init/plan/apply dans ce même conteneur, entre le drain Kubernetes et le
+# playbook SSH — découvert en CI : "terraform: not found" sans ce binaire).
 FROM python:3.12-slim
 
 ARG VAULT_VERSION=1.17.6
@@ -23,6 +26,10 @@ ARG VAULT_VERSION=1.17.6
 # kubectl reste compatible +/- 1 version mineure avec le serveur, mais autant
 # matcher précisément.
 ARG KUBECTL_VERSION=v1.30.5
+# Alignée sur la version utilisée par les jobs Terraform à plat du même
+# workflow (create-cluster, add-worker, delete-cluster) — pas de contrainte
+# stricte de compatibilité ici, mais autant rester cohérent.
+ARG TERRAFORM_VERSION=1.9.8
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -36,6 +43,10 @@ RUN apt-get update \
         "https://releases.hashicorp.com/vault/${VAULT_VERSION}/vault_${VAULT_VERSION}_linux_amd64.zip" \
     && unzip /tmp/vault.zip -d /usr/local/bin \
     && rm /tmp/vault.zip \
+    && curl -fsSL -o /tmp/terraform.zip \
+        "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip" \
+    && unzip /tmp/terraform.zip -d /usr/local/bin \
+    && rm /tmp/terraform.zip \
     && curl -fsSL -o /usr/local/bin/kubectl \
         "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
     && chmod +x /usr/local/bin/kubectl \
