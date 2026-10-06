@@ -60,6 +60,10 @@ if [[ -z "${fetched_key}" || "${fetched_key}" == "null" ]]; then
   return 1 2>/dev/null || true
 fi
 
+# DEBUG TEMPORAIRE (à retirer une fois le format d'aplatissement identifié) :
+# longueur et nombre de lignes seulement, jamais le contenu de la clé.
+echo "fetch-ssh-key.sh: DEBUG longueur=${#fetched_key} lignes=$(printf '%s' "${fetched_key}" | wc -l)" >&2
+
 printf '%s\n' "${fetched_key}" > "${key_file}"
 chmod 600 "${key_file}"
 
