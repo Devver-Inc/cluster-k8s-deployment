@@ -67,6 +67,11 @@ echo "fetch-ssh-key.sh: DEBUG longueur=${#fetched_key} lignes=$(printf '%s' "${f
 printf '%s\n' "${fetched_key}" > "${key_file}"
 chmod 600 "${key_file}"
 
+# DEBUG TEMPORAIRE : état réel du fichier écrit sur disque.
+echo "fetch-ssh-key.sh: DEBUG key_file=${key_file} taille=$(wc -c < "${key_file}") lignes_fichier=$(wc -l < "${key_file}") perms=$(ls -l "${key_file}")" >&2
+echo "fetch-ssh-key.sh: DEBUG premiere_ligne_len=$(head -1 "${key_file}" | wc -c) derniere_ligne_len=$(tail -1 "${key_file}" | wc -c)" >&2
+ssh-keygen -lf "${key_file}" >&2 2>&1 || echo "fetch-ssh-key.sh: DEBUG ssh-keygen exit=$?" >&2
+
 # Garde-fou : une clé collée dans un champ web non multi-ligne (UI Vault)
 # perd ses retours à la ligne internes et devient une seule ligne plate —
 # format toujours rejeté par SSH, mais avec un "Permission denied" qui ne
