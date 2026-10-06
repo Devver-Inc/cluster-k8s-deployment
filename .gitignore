@@ -1,3 +1,13 @@
 # Clé SSH privée temporaire écrite par ansible/fetch-ssh-key.sh — jamais
 # committée, toujours supprimée en fin de run (trap EXIT).
 ansible/.ssh_key_*
+
+# Kubeconfig temporaire écrit par ansible/fetch-kubeconfig.sh — même
+# principe (jamais committé, trap EXIT en fin de run).
+ansible/.kubeconfig_*
+
+# Tmp local Ansible (ANSIBLE_LOCAL_TEMP, voir proxmox-deploy-cluster.yml)
+# — redirigé sous le workspace du job pour éviter un résidu root créé
+# pendant le build de l'image sous /tmp (ansible-galaxy y tourne aussi en
+# root à ce moment-là, voir runner-images/ansible/Dockerfile).
+ansible/.ansible-tmp/
