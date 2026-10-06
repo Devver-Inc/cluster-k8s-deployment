@@ -5,6 +5,7 @@
 # 4. Ajuster node_count/tags/ressources ci-dessous selon le besoin réel du cluster.
 # subnet_index n'est PAS défini ici : lu automatiquement depuis org_subnet_index[var.org].
 
+# Trigger CI (fix GITHUB_OUTPUT du job detect)
 org                      = "test-vr"
 node_count               = 3 # minimum 3 (masters+workers)
 additional_workers_count = 1
