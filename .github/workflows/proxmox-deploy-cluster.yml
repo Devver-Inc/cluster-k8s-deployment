@@ -620,16 +620,37 @@ jobs:
       matrix:
         org: ${{ fromJson(needs.detect.outputs.orgs_delete || '[]') }}
     steps:
-      # L'admin a déjà supprimé lui-même clusters/<org>/ dans le commit qui a
-      # déclenché ce run (c'est cette disparition que detect a repérée, par
-      # comparaison d'état Vault vs repo — pas par diff de commit). Terraform
-      # a encore besoin du code du cluster pour le destroy — on checkout donc
-      # le commit PRÉCÉDENT, celui où le dossier existait encore (seul usage
-      # restant de github.event.before : retrouver le code à détruire, pas
-      # décider s'il faut le détruire).
+      # orgs_delete vient d'une comparaison d'ÉTAT (Vault vs repo), pas d'un
+      # diff de commit — l'org peut avoir disparu n'importe quand dans le
+      # passé, pas forcément dans CE push (ex: un 2ᵉ push, après un premier
+      # échoué ou juste pour une autre raison, redéclenche ce job pour la
+      # même org déjà supprimée il y a plusieurs commits). github.event.before
+      # ne remonte qu'au commit précédent CE push précis : utilisé seul, il a
+      # pu checkouter un commit où le dossier était DÉJÀ supprimé ("No such
+      # file or directory" sur working-directory, bug réel rencontré en CI).
+      # Donc : checkout normal (HEAD, profondeur complète pour chercher dans
+      # l'historique), puis retrouver via git log le dernier commit où
+      # terraform/clusters/<org>/ existait encore, et en restaurer SEULEMENT
+      # ce dossier à cette révision précise.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.before }}
+          fetch-depth: 0
+
+      - name: Restore the deleted cluster's code (for Terraform destroy)
+        run: |
+          set -euo pipefail
+          org="${{ matrix.org }}"
+          # git log -1 -- <chemin> retourne le DERNIER commit qui a touché ce
+          # chemin — qui est le commit de SUPPRESSION lui-même (le dossier
+          # n'existe déjà plus à ce commit). Le contenu à restaurer est celui
+          # du PARENT de ce commit (~1), le dernier où le dossier existait
+          # encore réellement.
+          delete_sha="$(git log -1 --format=%H -- "terraform/clusters/${org}/")"
+          if [[ -z "${delete_sha}" ]]; then
+            echo "Aucun commit trouvé ayant touché terraform/clusters/${org}/ — impossible de retrouver le code à détruire." >&2
+            exit 1
+          fi
+          git checkout "${delete_sha}~1" -- "terraform/clusters/${org}/"
 
       - name: Vault auth + fetch B2 credentials
         uses: hashicorp/vault-action@v3
