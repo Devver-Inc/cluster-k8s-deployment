@@ -35,6 +35,16 @@ name: "Provision cluster"
 #     node reste NotReady zombie indéfiniment dans kubectl get nodes — rien
 #     ne le nettoie jamais après coup).
 #
+# PAUSE EXPLICITE pour create-cluster : un plan qui révèle create-cluster
+# sur un simple PUSH est délibérément IGNORÉ (juste un ::warning:: dans les
+# logs du job detect, jamais ajouté à orgs_create) — la structure Vault
+# créée au step 0 n'a que des placeholders (vm_password=CHANGE_ME, etc.), un
+# apply échouerait de toute façon, mais SILENCIEUSEMENT (job rouge dans
+# Actions, sans jamais signaler explicitement qu'une action humaine est
+# attendue). create-cluster ne se déclenche donc QUE via workflow_dispatch,
+# après que l'admin ait saisi les vrais secrets dans Vault — seul chemin qui
+# alimente orgs_create.
+#
 # Ansible (installation/configuration RKE2) s'enchaîne AUTOMATIQUEMENT après
 # un terraform apply réussi pour create-cluster et add-worker (job
 # "configure" ci-dessous), uniquement sur l'org concernée par CE push,
@@ -47,15 +57,18 @@ name: "Provision cluster"
 # existant (jamais de recalcul global depuis un scan du repo) — même
 # garde-fou que l'ancien vault-create-org.yml.
 #
-# workflow_dispatch (org en input) reste le point de REPRISE EXPLICITE pour
-# UN cas précis que le push ne peut pas couvrir : la structure Vault est
-# créée automatiquement dès qu'un dossier clusters/<org>/ apparaît, mais
-# saisir les VRAIS secrets dans Vault (vm_password, ssh_private_key...) est
-# une opération qui se fait directement dans Vault, jamais via un commit git
-# — aucun push ne se reproduit donc automatiquement pour redéclencher
-# create-cluster une fois les secrets prêts. Ce déclenchement manuel comble
-# ce trou : toujours uniquement create-cluster, jamais delete/add/remove par
-# ce chemin.
+# workflow_dispatch (org en input) est donc le SEUL déclencheur possible de
+# create-cluster — jamais un push, même répété, même après saisie des
+# secrets (aucun commit ne se reproduit tout seul pour ça). Checklist avant
+# de le lancer (Actions > Provision cluster > Run workflow) :
+#   1. Le dossier terraform/clusters/<org>/ existe et est poussé sur main.
+#   2. La structure Vault existe déjà (créée automatiquement par le job
+#      detect au push précédent — vérifiable : policy terraform-<org>-ro
+#      listée par terraform/scripts/list-vault-orgs.sh).
+#   3. Les VRAIS secrets (vm_password, ssh_private_key, ssh_public_key) ont
+#      été saisis à la main dans devver-infra-deployment/<org> — jamais les
+#      placeholders CHANGE_ME du template.
+# Toujours uniquement create-cluster par ce chemin, jamais delete/add/remove.
 on:
   push:
     branches: [main]
@@ -192,7 +205,16 @@ jobs:
 
             case "${action}" in
               create-cluster)
-                orgs_create=$(echo "${orgs_create}" | jq -c --arg org "${org}" '. + [$org]')
+                # Jamais automatique sur push : la structure Vault créée au
+                # step précédent n'a que des placeholders (vm_password=CHANGE_ME,
+                # etc.) — lancer create-cluster maintenant échouerait de
+                # toute façon, mais SILENCIEUSEMENT (juste un job en rouge
+                # dans l'onglet Actions, sans jamais arrêter explicitement le
+                # flux pour l'admin). La vraie pause est ici : create-cluster
+                # ne se déclenche QUE via workflow_dispatch (voir plus haut),
+                # une fois les vrais secrets saisis à la main dans Vault —
+                # jamais sur un simple push, même si le dossier existe déjà.
+                echo "::warning::detect: '${org}' prête pour create-cluster, mais ignorée sur push — saisir les vrais secrets dans devver-infra-deployment/${org}, puis lancer workflow_dispatch (Actions > Provision cluster > Run workflow, input org=${org})." >&2
                 ;;
               add-worker)
                 orgs_add_worker=$(echo "${orgs_add_worker}" | jq -c --arg org "${org}" '. + [$org]')
