@@ -5,10 +5,10 @@
 # 4. Ajuster node_count/tags/ressources ci-dessous selon le besoin réel du cluster.
 # subnet_index n'est PAS défini ici : lu automatiquement depuis org_subnet_index[var.org].
 
-org                      = "test-vr-f"
+org                      = "test-vr-f2"
 node_count               = 3 # minimum 3 (masters+workers)
 additional_workers_count = 0
-tags                     = ["devver", "test-vr-f"]
+tags                     = ["devver", "test-vr-f2"]
 
 proxmox_node  = "PROXMOX-PVE1"
 datastore_id  = "SSD-PVE-DATA"
