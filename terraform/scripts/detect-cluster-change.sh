@@ -68,7 +68,18 @@ orgs_with_changed_files=$(printf '%s\n' "${changed_files}" \
   | sed -E 's#^terraform/clusters/([^/]+)/.*#\1#' \
   | grep -v '^_template$' | grep -v '^$' | sort -u || true)
 
-orgs_to_plan_lines=$(printf '%s\n%s\n' "${appeared}" "${orgs_with_changed_files}" | grep -v '^$' | sort -u || true)
+# Une org supprimée (dossier disparu, voir orgs_delete ci-dessus) peut
+# apparaître ici à tort : git diff liste aussi les fichiers .tf/tfvars
+# SUPPRIMÉS par ce push comme "changés", donc son dossier finirait dans
+# orgs_to_plan malgré son absence du repo après — "cd terraform/clusters/<org>"
+# échouerait alors dans la boucle terraform plan du job appelant (bug réel
+# rencontré en CI : "No such file or directory" sur le dossier supprimé).
+# orgs_after (ligne 60, dossiers réellement présents après ce push) est la
+# source de vérité : exclut toute org déjà retirée du repo, qu'elle soit
+# dans orgs_delete ou simplement renommée/déplacée.
+orgs_to_plan_lines=$(comm -12 \
+  <(printf '%s\n%s\n' "${appeared}" "${orgs_with_changed_files}" | grep -v '^$' | sort -u) \
+  <(printf '%s\n' "${orgs_after}") || true)
 orgs_to_plan="$(to_json_array "${orgs_to_plan_lines}")"
 
 echo "detect-cluster-change.sh: orgs_delete=${orgs_delete} orgs_to_plan=${orgs_to_plan}" >&2
