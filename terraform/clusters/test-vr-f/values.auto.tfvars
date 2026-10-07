@@ -1,14 +1,14 @@
 # Template de cluster — copier ce dossier vers clusters/<org>/, puis :
-# 1. Remplacer test-f partout (ici, backend.hcl, variables.tf) par le vrai nom d'org.
+# 1. Remplacer test-vr-f partout (ici, backend.hcl, variables.tf) par le vrai nom d'org.
 # 2. Ajouter l'org à org_subnet_index dans ../../ip-plan.auto.tfvars (prochain index libre).
 # 3. Recréer le symlink : ln -s ../../ip-plan.auto.tfvars ip-plan.auto.tfvars
 # 4. Ajuster node_count/tags/ressources ci-dessous selon le besoin réel du cluster.
 # subnet_index n'est PAS défini ici : lu automatiquement depuis org_subnet_index[var.org].
 
-org                      = "test-f"
+org                      = "test-vr-f"
 node_count               = 3 # minimum 3 (masters+workers)
 additional_workers_count = 0
-tags                     = ["devver", "test-f"]
+tags                     = ["devver", "test-vr-f"]
 
 proxmox_node  = "PROXMOX-PVE1"
 datastore_id  = "SSD-PVE-DATA"
