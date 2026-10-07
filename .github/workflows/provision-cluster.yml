@@ -411,7 +411,18 @@ jobs:
         shell: bash
         run: git config --global --add safe.directory '*'
 
+      # ref: main (pas le SHA implicite de l'event, figé au déclenchement du
+      # run) — ce job dépend de create-cluster/add-worker (needs:), qui
+      # committent et PUSHENT l'inventaire Ansible généré PENDANT ce même
+      # run, après que le run ait démarré. Sans ref: explicite,
+      # actions/checkout@v4 checkoute github.sha (l'état du repo au moment
+      # du push qui a déclenché le run), ignorant tout commit poussé entre
+      # temps — bug réel rencontré en CI : configure tournait sur un
+      # inventaire sans le worker tout juste ajouté par add-worker, dont le
+      # commit existait pourtant déjà sur main au moment du checkout.
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       # Même AppRole terraform-ci que Terraform (voir terraform/README.md) —
       # sa policy couvre déjà la lecture/écriture sur devver-infra-deployment/data/*.
