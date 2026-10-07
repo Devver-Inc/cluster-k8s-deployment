@@ -7,7 +7,7 @@
 
 org                      = "test-vr-final"
 node_count               = 3 # minimum 3 (masters+workers)
-additional_workers_count = 1
+additional_workers_count = 0
 tags                     = ["devver", "test-vr-final"]
 
 proxmox_node  = "PROXMOX-PVE1"
