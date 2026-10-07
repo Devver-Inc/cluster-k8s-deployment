@@ -1,10 +1,19 @@
-name: "2 - Proxmox: apply/destroy cluster"
+name: "Provision cluster"
 
-# Déclenché par push sur terraform/clusters/** — l'admin édite un fichier
-# (crée/supprime un dossier terraform/clusters/<org>/, ou change
+# Workflow unique pour tout le cycle de vie d'un cluster — fusionne ce qui
+# était avant 2 workflows séparés ("1 - Vault: création structure org" et
+# "2 - Proxmox: apply/destroy cluster") en un seul, pour n'avoir qu'un point
+# d'entrée. Déclenché par push sur terraform/clusters/** — l'admin édite un
+# fichier (crée/supprime un dossier terraform/clusters/<org>/, ou change
 # additional_workers_count dans values.auto.tfvars) et pushe ; le job
-# "detect" déduit l'action qui en découle pour chaque org concernée, en 2
-# étapes :
+# "detect" déduit l'action qui en découle pour chaque org concernée :
+#
+#   0. Structure Vault (vault-create, fusionné ici) : toute org présente
+#      dans le repo mais pas encore connue de Vault (comparaison d'ÉTAT —
+#      policies terraform-<org>-ro — pas un diff de commit) se voit créer
+#      sa structure Vault automatiquement, AVANT tout terraform plan — sinon
+#      un plan sur une org tout juste créée échouerait faute de credentials
+#      Proxmox/VM dans Vault (même le mount n'existerait pas encore).
 #   1. Présélection légère (detect-cluster-change.sh) : quelles orgs ont un
 #      dossier apparu/disparu, ou un fichier .tf/values.auto.tfvars modifié
 #      dans ce push — ne décide JAMAIS seul d'une action, réduit seulement
@@ -28,25 +37,25 @@ name: "2 - Proxmox: apply/destroy cluster"
 #
 # Ansible (installation/configuration RKE2) s'enchaîne AUTOMATIQUEMENT après
 # un terraform apply réussi pour create-cluster et add-worker (job
-# "configure" ci-dessous) — ce workflow absorbe entièrement l'ancien "3 -
-# Ansible: configurer les clusters" (découplé auparavant, déclenché par push
-# sur ansible/** et reconfigurant TOUJOURS tous les clusters existants, gros
-# overhead). Le job "configure" ne cible désormais que l'org concernée par
-# CE push, jamais les autres.
+# "configure" ci-dessous), uniquement sur l'org concernée par CE push,
+# jamais les autres.
 #
-# Pas de risque de destruction croisée entre orgs (contrairement à
-# terraform/vault/, un seul for_each partagé) : chaque org a son propre state
-# Terraform isolé dans terraform/clusters/<org>/.
+# Pas de risque de destruction croisée entre orgs pour les clusters
+# (contrairement à terraform/vault/, un seul for_each partagé) : chaque org
+# a son propre state Terraform isolé dans terraform/clusters/<org>/. Pour
+# Vault, le job vault-create n'AJOUTE jamais qu'une org à l'état réel
+# existant (jamais de recalcul global depuis un scan du repo) — même
+# garde-fou que l'ancien vault-create-org.yml.
 #
-# workflow_dispatch (org en input) reste disponible pour UN cas précis que le
-# push ne peut pas couvrir : la structure Vault est créée automatiquement dès
-# qu'un dossier clusters/<org>/ apparaît (voir vault-create-org.yml), mais
+# workflow_dispatch (org en input) reste le point de REPRISE EXPLICITE pour
+# UN cas précis que le push ne peut pas couvrir : la structure Vault est
+# créée automatiquement dès qu'un dossier clusters/<org>/ apparaît, mais
 # saisir les VRAIS secrets dans Vault (vm_password, ssh_private_key...) est
 # une opération qui se fait directement dans Vault, jamais via un commit git
 # — aucun push ne se reproduit donc automatiquement pour redéclencher
 # create-cluster une fois les secrets prêts. Ce déclenchement manuel comble
-# ce trou sans réintroduire le binaire create/delete d'origine : toujours
-# uniquement create-cluster, jamais delete/add/remove par ce chemin.
+# ce trou : toujours uniquement create-cluster, jamais delete/add/remove par
+# ce chemin.
 on:
   push:
     branches: [main]
@@ -55,7 +64,7 @@ on:
       - "terraform/scripts/**"
       - "ansible/**"
       - "runner-images/ansible/**"
-      - ".github/workflows/proxmox-deploy-cluster.yml"
+      - ".github/workflows/provision-cluster.yml"
   workflow_dispatch:
     inputs:
       org:
@@ -68,7 +77,7 @@ env:
   IMAGE_NAME: ghcr.io/${{ github.repository }}/ansible-runner
 
 jobs:
-  # --- Détection -------------------------------------------------------------
+  # --- Détection (+ création structure Vault en amont) --------------------
 
   detect:
     runs-on: self-hosted
@@ -105,10 +114,41 @@ jobs:
             devver-infra-deployment/data/s3-backend key_id | AWS_ACCESS_KEY_ID ;
             devver-infra-deployment/data/s3-backend application_key | AWS_SECRET_ACCESS_KEY
 
+      # Fusion de l'ancien job "vault-create" (1 - Vault) : toute org
+      # présente dans le repo (terraform/clusters/<org>/) mais pas encore
+      # connue de Vault se voit créer sa structure ici, AVANT le terraform
+      # plan par org ci-dessous — sinon un plan sur une org tout juste créée
+      # échouerait faute de credentials Proxmox/VM dans Vault. État réel
+      # (comparaison repo vs Vault), pas un diff de commit — fiable même si
+      # plusieurs push s'enchaînent ou qu'un run précédent a échoué.
+      - name: Create Vault structure for any new org (placeholders only)
+        id: vault_create
+        env:
+          TF_VAR_vault_role_id: ${{ secrets.VAULT_CI_ROLE_ID }}
+          TF_VAR_vault_secret_id: ${{ secrets.VAULT_CI_SECRET_ID }}
+        run: |
+          set -euo pipefail
+
+          orgs_json="$(env -u GITHUB_OUTPUT bash terraform/scripts/detect-org-change.sh | grep '^orgs=' | cut -d= -f2-)"
+
+          for org in $(echo "${orgs_json}" | jq -r '.[]'); do
+            echo "Création de la structure Vault pour '${org}'..." >&2
+            current="$(bash terraform/scripts/list-vault-orgs.sh)"
+            new_list="$(printf '%s\n%s\n' "${current}" "${org}" | grep -v '^$' | sort -u | jq -R . | jq -s -c .)"
+
+            terraform -chdir=terraform/vault init -backend-config=backend.hcl -input=false >&2
+            terraform -chdir=terraform/vault apply -auto-approve -input=false -var="orgs=${new_list}" >&2
+          done
+
       # Étape 1 (présélection) + étape 2 (confirmation par plan, une fois
       # par org candidate) — regroupées ici : la confirmation a besoin des
       # credentials B2/Vault déjà exportés dans ce step pour faire un
-      # terraform init/plan par org.
+      # terraform init/plan par org. À ce stade, toute org candidate a déjà
+      # sa structure Vault (soit préexistante, soit créée au step
+      # précédent) — un plan échoue seulement si les VRAIS secrets
+      # (vm_password, ssh_private_key...) n'ont pas encore été saisis
+      # manuellement dans Vault, ce qui est normal et attendu (voir
+      # workflow_dispatch en tête de fichier pour la reprise).
       - id: plan
         env:
           TF_VAR_vault_role_id: ${{ secrets.VAULT_CI_ROLE_ID }}
@@ -359,9 +399,7 @@ jobs:
       fail-fast: false
       # orgs_configure = union de orgs_create et orgs_add_worker, déjà
       # précalculée par le job detect — ce workflow ne cible QUE l'org
-      # concernée par CE push, jamais tous les clusters existants
-      # (contrairement à l'ancien "3 - Ansible", qui reconfigurait TOUJOURS
-      # toutes les orgs à chaque push sur ansible/**).
+      # concernée par CE push, jamais tous les clusters existants.
       matrix:
         org: ${{ fromJson(needs.detect.outputs.orgs_configure || '[]') }}
     steps:
@@ -425,12 +463,12 @@ jobs:
           ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/02-dependencies.yml
           ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/03-cluster-init.yml
 
-  # Même raison que remove-worker-fix-ownership ci-dessous : configure
-  # tourne en root dans son conteneur (symlink group_vars, group_vars
-  # résolu, inventaire éventuellement modifié...), ce job à plat reprend
-  # possession du workspace pour l'UID du runner avant le prochain job qui
-  # checkoute à plat.
-  configure-fix-ownership:
+  # configure tourne en root dans son conteneur (symlink group_vars,
+  # inventaire éventuellement modifié...) — ce job à plat reprend possession
+  # du workspace pour l'UID du runner avant le prochain job qui checkoute à
+  # plat, sinon EACCES. Voir le commentaire plus complet sur
+  # remove-worker-cleanup-workspace ci-dessous (même mécanisme).
+  configure-cleanup-workspace:
     needs: [detect, configure]
     if: always() && needs.detect.outputs.orgs_configure != '[]'
     runs-on: self-hosted
@@ -456,7 +494,7 @@ jobs:
     # approche (voir l'historique git de ce fichier). Le conteneur écrit
     # donc ses fichiers (.terraform/, clé SSH temporaire...) en root dans le
     # workspace partagé du runner self-hosted — remis à l'UID gh_runner
-    # juste après par le job remove-worker-fix-ownership ci-dessous, qui
+    # juste après par le job remove-worker-cleanup-workspace ci-dessous, qui
     # tourne à plat (container: est une clé de job, impossible de mélanger
     # un step conteneurisé et un step à plat dans le même job).
     container:
@@ -479,7 +517,8 @@ jobs:
       # Indépendant de l'UID du conteneur (root ici) : le workspace est
       # partagé entre des runs/jobs successifs qui n'ont pas forcément le
       # même propriétaire (ex: ce job tourne en root, le job
-      # remove-worker-fix-ownership qui suit tourne en tant que gh_runner).
+      # remove-worker-cleanup-workspace qui suit tourne en tant que
+      # gh_runner).
       - name: Trust the shared self-hosted workspace (git safe.directory)
         shell: bash
         run: git config --global --add safe.directory '*'
@@ -594,11 +633,10 @@ jobs:
   # workspace pour l'UID du runner — sinon le prochain job qui checkoute à
   # plat (ex: detect) échoue avec EACCES. if: always() : s'exécute même si
   # remove-worker (ou l'un de ses steps) a échoué, pour que le workspace
-  # soit toujours sain avant le run suivant. Remplace l'ancien step "Clean
-  # up .terraform", qui ne couvrait que ce seul fichier — ce job-ci couvre
-  # tout le workspace, pour tout type de fichier qu'un futur playbook/script
-  # pourrait créer sans qu'on l'ait anticipé.
-  remove-worker-fix-ownership:
+  # soit toujours sain avant le run suivant. Couvre tout le workspace, pour
+  # tout type de fichier qu'un futur playbook/script pourrait créer sans
+  # qu'on l'ait anticipé.
+  remove-worker-cleanup-workspace:
     needs: [detect, remove-worker]
     if: always() && needs.detect.outputs.orgs_remove_worker != '[]'
     runs-on: self-hosted

@@ -210,13 +210,14 @@ workers additionnels — convention RKE2 type `lablabs.rke2`).
 
 ## Pipeline CI
 
-Les 3 étapes ci-dessus sont automatisées par deux workflows,
-[`vault-create-org.yml`](../.github/workflows/vault-create-org.yml) (auto)
-et [`proxmox-deploy-cluster.yml`](../.github/workflows/proxmox-deploy-cluster.yml) (manuel) :
-un push ajoutant/supprimant un dossier `clusters/<org>/` déclenche la
-détection et la structure Vault, puis un second déclenchement manuel termine
-l'apply/destroy infra (découpage en deux dû à l'absence des Environments
-GitHub natifs sur repo privé en plan Free). Voir
+Les 3 étapes ci-dessus sont automatisées par un seul workflow,
+[`provision-cluster.yml`](../.github/workflows/provision-cluster.yml) : un
+push ajoutant/supprimant un dossier `clusters/<org>/` déclenche la détection
+et la structure Vault automatiquement (étape 1 du job `detect`) ; la saisie
+des vrais secrets reste manuelle (directement dans Vault), suivie d'un
+déclenchement manuel explicite (`workflow_dispatch`) pour terminer
+l'apply infra — seul point de reprise manuelle, faute de pouvoir
+automatiser une action qui se fait hors de GitHub. Voir
 [`DEPLOY.md`](DEPLOY.md#via-la-pipeline-ci) pour le setup initial (AppRole
 `terraform-ci`, secrets GitHub) et le détail du flux.
 

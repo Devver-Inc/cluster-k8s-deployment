@@ -14,8 +14,8 @@ pip install ansible
 ansible-galaxy collection install -r requirements.yml
 ```
 
-En **CI** (jobs `configure`/`remove-worker` du workflow `2 - Proxmox`), ces
-prérequis sont fournis par l'image `runner-images/ansible/` — voir
+En **CI** (jobs `configure`/`remove-worker` du workflow `Provision cluster`),
+ces prérequis sont fournis par l'image `runner-images/ansible/` — voir
 [Isolation](#isolation--exécution-en-conteneur).
 
 ## Secrets et inventaire
@@ -80,7 +80,7 @@ ansible-playbook -i "$INV" -e cluster_org=<org> -e ansible_ssh_private_key_file=
    avant que Terraform ne détruise sa VM. **Toujours** lancé avec `--limit`
    ciblant précisément le(s) node(s) concerné(s) (jamais tout l'inventaire),
    orchestré par le job `remove-worker` de
-   [`proxmox-deploy-cluster.yml`](../.github/workflows/proxmox-deploy-cluster.yml)
+   [`provision-cluster.yml`](../.github/workflows/provision-cluster.yml)
    — voir [Retrait d'un worker](#retrait-dun-worker) plus bas.
 
 ## Limitation connue — jonction sans VIP
@@ -102,10 +102,10 @@ la VM du worker **sans jamais le retirer du cluster** — le node restait
 coup.
 
 Le job `remove-worker` de
-[`proxmox-deploy-cluster.yml`](../.github/workflows/proxmox-deploy-cluster.yml)
+[`provision-cluster.yml`](../.github/workflows/provision-cluster.yml)
 automatise désormais la séquence complète, dans cet ordre strict :
 
-1. `terraform/scripts/detect-worker-removal.sh` lit un vrai `terraform plan`
+1. `terraform/scripts/detect-cluster-plan.sh` lit un vrai `terraform plan`
    pour savoir EXACTEMENT quel(s) `worker-N` va être détruit — échoue net
    (garde-fou) si le plan révèle la destruction d'un **master** (retrait de
    master non supporté par ce mécanisme, risque de perte de quorum etcd,
@@ -132,7 +132,7 @@ système (`04-remove-node.yml`).
 
 Contrairement à Terraform (qui reste à plat sur le runner, voir
 `terraform/DEPLOY.md`), **les jobs `configure` et `remove-worker`** du
-workflow `2 - Proxmox` — y compris le login Vault (`hashicorp/vault-action`)
+workflow `Provision cluster` — y compris le login Vault (`hashicorp/vault-action`)
 et `fetch-ssh-key.sh`/`fetch-kubeconfig.sh` — tournent dans un conteneur
 Docker custom défini par
 [`runner-images/ansible/Dockerfile`](../runner-images/ansible/Dockerfile)
@@ -166,19 +166,19 @@ d'Ansible, son `ControlPath` SSH par défaut — tous consultent NSS ou `$HOME`
 d'une façon que GitHub Actions perturbe en forçant `HOME=/github/home` sur
 chaque step). Les fichiers que ce conteneur écrit dans le workspace partagé
 du runner self-hosted appartiennent donc à root côté hôte — un job à plat
-dédié (`remove-worker-fix-ownership`/`configure-fix-ownership`, voir
-`proxmox-deploy-cluster.yml`) les rend à l'utilisateur du runner juste
+dédié (`remove-worker-cleanup-workspace`/`configure-cleanup-workspace`, voir
+`provision-cluster.yml`) les rend à l'utilisateur du runner juste
 après, via `sudo chown -R` (prérequis sudoers documenté dans
 `terraform/DEPLOY.md`), plutôt que de chasser chaque outil sensible à l'UID
 à l'intérieur du conteneur.
 
 ## Pipeline CI
 
-Ansible n'a plus de workflow dédié — il est entièrement intégré au workflow
-[`proxmox-deploy-cluster.yml`](../.github/workflows/proxmox-deploy-cluster.yml)
-(« **2 - Proxmox: apply/destroy cluster** » dans l'onglet Actions), déclenché
-par push sur `terraform/clusters/**`, `ansible/**` ou
-`runner-images/ansible/**`.
+Ansible n'a pas de workflow dédié — il est entièrement intégré au workflow
+unique [`provision-cluster.yml`](../.github/workflows/provision-cluster.yml)
+(« **Provision cluster** » dans l'onglet Actions, qui gère aussi la
+structure Vault et l'infra Proxmox), déclenché par push sur
+`terraform/clusters/**`, `ansible/**` ou `runner-images/ansible/**`.
 
 Après un `terraform apply` réussi pour **create-cluster** ou **add-worker**,
 le job `configure` s'enchaîne **automatiquement** (`needs:` sur le job

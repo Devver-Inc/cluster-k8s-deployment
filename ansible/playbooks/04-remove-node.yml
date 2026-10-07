@@ -5,7 +5,7 @@
 # DOIT toujours être lancé avec --limit ciblant précisément le(s) node(s) à
 # retirer (jamais tout l'inventaire par défaut), et toujours APRÈS un
 # "kubectl drain" réussi sur ce même node — orchestré par le job
-# remove-worker de .github/workflows/proxmox-deploy-cluster.yml, pas par ce
+# remove-worker de .github/workflows/provision-cluster.yml, pas par ce
 # playbook lui-même (drain/delete node sont des opérations API Kubernetes
 # pures, faites en kubectl direct depuis le CI — ce playbook ne fait que la
 # partie système/SSH sur le node).

@@ -6,8 +6,8 @@ vide. Pour une org suivante, sauter aux étapes marquées **(nouvelle org)**.
 Ce guide décrit la procédure **manuelle** (debug/test local). En usage normal,
 une fois la pipeline CI en place (voir [section dédiée](#via-la-pipeline-ci)
 en fin de fichier), tout se pilote par **push** sur `terraform/clusters/**` —
-le workflow `2 - Proxmox: apply/destroy cluster` détecte automatiquement
-l'action à mener selon ce qui a changé :
+le workflow `Provision cluster` détecte automatiquement l'action à mener
+selon ce qui a changé :
 - **créer** un cluster : créer un dossier `terraform/clusters/<org>/` et
   merger la PR.
 - **supprimer** un cluster : supprimer le dossier soi-même (`git rm -r
@@ -144,54 +144,52 @@ terraform destroy
 
 ## Via la pipeline CI
 
-Deux workflows, tous deux pilotés par **push** — l'admin modifie le code
-(crée/supprime un dossier `terraform/clusters/<org>/`, change
-`additional_workers_count`) et pousse, le pipeline déduit l'action à mener :
+Un seul workflow, [`provision-cluster.yml`](../.github/workflows/provision-cluster.yml)
+(« **Provision cluster** » dans l'onglet Actions), piloté par **push** —
+l'admin modifie le code (crée/supprime un dossier
+`terraform/clusters/<org>/`, change `additional_workers_count`) et pousse,
+le pipeline déduit l'action à mener. Déclenché automatiquement sur
+`terraform/clusters/**`, `ansible/**` ou `runner-images/ansible/**`. Le job
+`detect` enchaîne, pour chaque org concernée par le push :
 
-1. [`vault-create-org.yml`](../.github/workflows/vault-create-org.yml)
-   (« **1 - Vault: création structure org** » dans l'onglet Actions) — sur
-   push touchant `terraform/clusters/**` : le job `detect` compare l'état du
-   repo à l'état **réel** de Vault, et le job `vault-create` crée
-   automatiquement la structure Vault de toute org présente dans le repo
-   mais pas encore dans Vault — en **ajoutant** uniquement ces orgs à l'état
-   réel de Vault, jamais en recalculant la liste complète depuis un scan du
-   repo (ça a réellement failli supprimer la structure Vault de `prod` avec
-   l'ancien mécanisme — éliminé structurellement ici, aucune org déjà connue
-   de Vault ne peut disparaître via ce chemin). `workflow_dispatch` (input
-   `org`) reste disponible pour une création ponctuelle manuelle (ex: rejouer
-   après un échec), mais n'est plus le chemin principal.
-2. [`proxmox-deploy-cluster.yml`](../.github/workflows/proxmox-deploy-cluster.yml)
-   (« **2 - Proxmox: apply/destroy cluster** » dans l'onglet Actions) —
-   déclenché **automatiquement par push** sur `terraform/clusters/**`,
-   `ansible/**` ou `runner-images/ansible/**`. Absorbe aussi la
-   configuration Ansible (RKE2) : plus de workflow séparé pour ça. Un job
-   `detect` confirme par un vrai `terraform plan` par org candidate (pas un
-   simple diff de commits — fiable et idempotent par construction, voir
-   note plus bas) l'une de 4 actions, chacune son propre job :
-   `create-cluster`, `delete-cluster`, `add-worker`, `remove-worker` (voir
-   détail plus bas). Après un `create-cluster`/`add-worker` réussi, le job
-   `configure` enchaîne **automatiquement** les playbooks Ansible — mais
-   uniquement sur l'org concernée par ce push, jamais sur tous les clusters
-   existants (voir [`ansible/README.md`](../ansible/README.md#pipeline-ci)).
+1. **Structure Vault** — compare l'état du repo à l'état **réel** de Vault,
+   et crée automatiquement la structure Vault de toute org présente dans le
+   repo mais pas encore dans Vault — en **ajoutant** uniquement ces orgs à
+   l'état réel de Vault, jamais en recalculant la liste complète depuis un
+   scan du repo (ça a réellement failli supprimer la structure Vault de
+   `prod` avec l'ancien mécanisme — éliminé structurellement ici, aucune org
+   déjà connue de Vault ne peut disparaître via ce chemin). Fait **avant**
+   le `terraform plan` par org ci-dessous, pour qu'une org tout juste créée
+   ait déjà sa structure Vault au moment du plan (sinon le plan échouerait
+   faute de credentials).
+2. **Action réelle** — confirmée par un vrai `terraform plan` par org
+   candidate (pas un simple diff de commits — fiable et idempotent par
+   construction, voir note plus bas) : l'une de 4 actions, chacune son
+   propre job : `create-cluster`, `delete-cluster`, `add-worker`,
+   `remove-worker` (voir détail plus bas). Après un
+   `create-cluster`/`add-worker` réussi, le job `configure` enchaîne
+   **automatiquement** les playbooks Ansible — mais uniquement sur l'org
+   concernée par ce push, jamais sur tous les clusters existants (voir
+   [`ansible/README.md`](../ansible/README.md#pipeline-ci)).
 
 La détection `create-cluster`/`add-worker`/`remove-worker` lit l'état **réel**
 (`terraform plan`) plutôt qu'un diff entre deux commits consécutifs — même
-leçon que celle déjà tirée sur `detect-org-change.sh` : un diff à 2 commits
-peut rater un delta si un run échoue entre deux push, ou si plusieurs push
-s'enchaînent rapidement. Une présélection légère (diff de commit, sur quels
-fichiers ont changé) réduit juste le nombre d'orgs à planifier à chaque run,
-sans jamais décider seule d'une action.
+leçon que celle déjà tirée sur l'ancien `detect-org-change.sh` : un diff à 2
+commits peut rater un delta si un run échoue entre deux push, ou si
+plusieurs push s'enchaînent rapidement. Une présélection légère (diff de
+commit, sur quels fichiers ont changé) réduit juste le nombre d'orgs à
+planifier à chaque run, sans jamais décider seule d'une action.
 
 La structure Vault créée automatiquement contient encore les placeholders du
 template (`vm_password=CHANGE_ME`, etc.) — `create-cluster` peut se
 déclencher dans la foulée sur le même push dès que la structure existe, mais
 échouera proprement (credentials VM invalides) tant que les vrais secrets
-n'ont pas été saisis dans Vault (Étape 2 ci-dessus). Pas de risque, juste un
-job en erreur à corriger avant de repousser un commit trivial pour relancer.
-
-Si l'org passe un jour sur un plan GitHub payant (Team/Enterprise), il devient
-possible de revenir à un unique workflow avec de vrais Environments — pas
-nécessaire pour l'instant, ce découpage en deux fonctionne aussi bien.
+n'ont pas été saisis dans Vault (Étape 2 ci-dessus). Comme la saisie des
+secrets se fait directement dans Vault (jamais via un commit git), aucun
+push ne se reproduit automatiquement pour redéclencher `create-cluster` une
+fois les secrets prêts — reprendre se fait via `workflow_dispatch` (input
+`org`), seul déclenchement manuel explicite de ce workflow, utilisé
+uniquement pour ce cas précis (jamais pour delete/add/remove).
 
 ### Prérequis logiciels sur le runner self-hosted
 
@@ -212,7 +210,7 @@ workflows eux-mêmes) :
 - **`git`** — utilisé par le step `Remove cluster folder and push` (suppression
   d'un cluster, voir plus bas) pour committer et pousser sur `main`.
 - **`docker`** — utilisé par les jobs `configure` et `remove-worker` de
-  `2 - Proxmox` (voir `ansible/README.md`) pour builder/exécuter l'image
+  `Provision cluster` (voir `ansible/README.md`) pour builder/exécuter l'image
   `runner-images/ansible/Dockerfile` dans laquelle tourne tout le job (Ansible
   + `kubectl` installés uniquement dans l'image, pas sur le runner).
   L'utilisateur qui fait tourner le service `actions-runner` doit pouvoir
@@ -223,8 +221,8 @@ workflows eux-mêmes) :
   pour le pourquoi, après plusieurs approches avec un UID non-root
   abandonnées). Les fichiers qu'elle écrit dans le workspace partagé du
   runner (`.terraform/`, inventaire, etc.) appartiennent donc à root côté
-  hôte — les jobs `remove-worker-fix-ownership`/`configure-fix-ownership`
-  (voir `proxmox-deploy-cluster.yml`) les rendent à l'utilisateur du runner
+  hôte — les jobs `remove-worker-cleanup-workspace`/`configure-cleanup-workspace`
+  (voir `provision-cluster.yml`) les rendent à l'utilisateur du runner
   juste après, via `sudo chown -R`. Ajouter sur la machine runner
   (`sudo visudo`), en remplaçant `gh_runner` par l'utilisateur réel du
   service `actions-runner` et `<chemin>` par le dossier `_work` du runner :
@@ -242,7 +240,7 @@ workflows eux-mêmes) :
 > survivent pas au job qui les exporte, mais rien d'autre n'est assaini
 > automatiquement). Accepté comme tel pour Terraform/Vault (repo privé, équipe
 > restreinte de confiance). Les jobs `configure` et `remove-worker` de
-> `2 - Proxmox` font exception : tout le job (y compris le login Vault)
+> `Provision cluster` font exception : tout le job (y compris le login Vault)
 > tourne dans le conteneur `runner-images/ansible/` (`container:` dans le
 > YAML) — voir `ansible/README.md#isolation`.
 
@@ -284,13 +282,13 @@ vault write -f auth/terraform-orgs/role/terraform-ci/secret-id
   `VAULT_CI_ROLE_ID`, `VAULT_CI_SECRET_ID` (valeurs ci-dessus) — aucun autre
   secret nécessaire, aucun secret par org.
 
-### Ce que fait chaque workflow selon le cas
+### Ce que fait le workflow selon le cas
 
 **Ajout d'un dossier `clusters/<org>/`** :
-Le push déclenche `vault-create-org.yml` : `detect` repère que `<org>` n'a
-pas encore de structure Vault → job `vault-create` la crée automatiquement
-(uniquement pour cette org, sans toucher aux autres). Le même push déclenche
-aussi `proxmox-deploy-cluster.yml`, mais `create-cluster` échoue à ce stade
+Le push déclenche `provision-cluster.yml` : dans le job `detect`, l'étape
+Vault repère que `<org>` n'a pas encore de structure Vault et la crée
+automatiquement (uniquement pour cette org, sans toucher aux autres), avant
+même le `terraform plan`. `create-cluster` échoue ensuite à ce stade
 (secrets encore à leurs placeholders `CHANGE_ME`).
 
 Saisir les vrais secrets se fait **directement dans Vault** (UI ou CLI),
@@ -298,19 +296,22 @@ jamais via un commit git — aucun push ne se reproduit donc automatiquement
 pour redéclencher `create-cluster` une fois les secrets prêts. Deux options
 pour relancer :
 - Pousser un commit (même trivial) touchant `terraform/clusters/<org>/`.
-- Ou lancer **manuellement** `proxmox-deploy-cluster.yml` en
-  `workflow_dispatch` (**Actions > 2 - Proxmox: apply/destroy cluster > Run
-  workflow**, input `org`) — filet de sécurité qui ne fait toujours QUE
-  `create-cluster` pour l'org donnée, jamais delete/add/remove par ce chemin.
+- Ou lancer **manuellement** `provision-cluster.yml` en `workflow_dispatch`
+  (**Actions > Provision cluster > Run workflow**, input `org`) — filet de
+  sécurité qui ne fait toujours QUE `create-cluster` pour l'org donnée,
+  jamais delete/add/remove par ce chemin.
 
 **Supprimer un cluster** — supprimer `terraform/clusters/<org>/` soi-même
 (`git rm -r terraform/clusters/<org>/`) et pousser sur `main` :
 
-Le job `detect` repère la disparition du dossier → job `delete-cluster`
-(checkout du commit **précédent**, où le code existe encore, pour pouvoir
-faire le `terraform destroy`), puis `vault-cleanup` nettoie la structure
-Vault de l'org. Rien d'autre à committer après coup — le dossier a déjà
-disparu dans le commit qui a déclenché tout ça.
+Le job `detect` repère la disparition du dossier (comparaison d'état Vault
+vs repo, pas un diff de commit — fonctionne même si la suppression date de
+plusieurs push) → job `delete-cluster` retrouve dynamiquement, via `git
+log`, le dernier commit où le dossier existait encore, en restaure
+seulement ce dossier pour pouvoir faire le `terraform destroy`, puis
+`vault-cleanup` nettoie la structure Vault de l'org. Rien d'autre à
+committer après coup — le dossier a déjà disparu dans le commit qui a
+déclenché tout ça.
 
 **Ajouter/retirer un worker** — modifier `additional_workers_count` dans
 `values.auto.tfvars` et pousser sur `main` :
