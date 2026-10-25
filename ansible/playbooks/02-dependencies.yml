@@ -38,13 +38,21 @@
         state: enabled
       loop: "{{ firewalld_ports }}"
 
+    # Noeuds + réseaux internes RKE2 (doc RKE2, firewalld) : sans les CIDR pods
+    # et services, le trafic pod→pod entre noeuds (décapsulé de VXLAN, source
+    # 10.42.x) est rejeté par firewalld ("no route to host") — DNS du cluster
+    # intermittent, pods injoignables d'un noeud à l'autre.
     - name: Ouvrir le CNI Flannel (VXLAN) et le trafic intra-cluster en zone trusted
       ansible.posix.firewalld:
         zone: trusted
-        source: 192.168.45.0/24
+        source: "{{ item }}"
         permanent: true
         immediate: true
         state: enabled
+      loop:
+        - 192.168.45.0/24   # noeuds
+        - 10.42.0.0/16      # pods (cluster-cidr RKE2 par défaut)
+        - 10.43.0.0/16      # services (service-cidr RKE2 par défaut)
 
     - name: Vérifier si RKE2 est déjà installé
       ansible.builtin.stat:
