@@ -1,8 +1,8 @@
 # Ansible — installation RKE2
 
-Quatre playbooks indépendants qui amènent les VMs provisionnées par
-Terraform jusqu'à un cluster RKE2 fonctionnel, et retirent proprement un
-node avant qu'il ne soit détruit. Cible : Rocky Linux 9 (template Terraform
+Cinq playbooks indépendants qui amènent les VMs provisionnées par
+Terraform jusqu'à un cluster RKE2 fonctionnel branché sur Vault, et retirent
+proprement un node avant qu'il ne soit détruit. Cible : Rocky Linux 9 (template Terraform
 actuel).
 
 ## Prérequis
@@ -55,6 +55,8 @@ KEY_PATH="$(pwd)/.ssh_key_<org>"
 ansible-playbook -i "$INV" -e cluster_org=<org> -e ansible_ssh_private_key_file="$KEY_PATH" playbooks/01-base.yml
 ansible-playbook -i "$INV" -e cluster_org=<org> -e ansible_ssh_private_key_file="$KEY_PATH" playbooks/02-dependencies.yml
 ansible-playbook -i "$INV" -e cluster_org=<org> -e ansible_ssh_private_key_file="$KEY_PATH" playbooks/03-cluster-init.yml
+# clusters <org>-<prod|staging|dev> uniquement :
+ansible-playbook -i "$INV" -e cluster_org=<org> -e ansible_ssh_private_key_file="$KEY_PATH" playbooks/05-vault-k8s.yml
 ```
 
 ## Ce que fait chaque playbook
@@ -82,6 +84,24 @@ ansible-playbook -i "$INV" -e cluster_org=<org> -e ansible_ssh_private_key_file=
    orchestré par le job `remove-worker` de
    [`provision-cluster.yml`](../.github/workflows/provision-cluster.yml)
    — voir [Retrait d'un worker](#retrait-dun-worker) plus bas.
+5. **`05-vault-k8s.yml`** (1er master + contrôleur) — branche le cluster sur
+   Vault pour les secrets applicatifs consommés par External Secrets Operator.
+   Uniquement pour un cluster nommé `<org>-<prod|staging|dev>` (le job
+   `configure` l'ignore sinon). Il :
+   - crée `kube-system/vault-auth` (ServiceAccount + token longue durée +
+     `system:auth-delegator`), le *token reviewer* de Vault ;
+   - écrit `auth/k8s-<org>-<env>/config` (API `https://<master1>:6443`, CA
+     RKE2, JWT reviewer) — le mount, les policies et les roles sont créés par
+     [`terraform/vault/k8s-secrets.tf`](../terraform/vault/k8s-secrets.tf) ;
+   - initialise `kubernetes-cluster/<org>/<env>/*` d'après le catalogue
+     [`vars/vault-k8s-secrets.yml`](vars/vault-k8s-secrets.yml) : valeurs
+     générées, fixes, AppRole du backend, ou `CHANGEME` à saisir dans la
+     console. **Une clé existante n'est jamais réécrite** : relançable sans
+     risque, et ajouter une clé au catalogue n'ajoute que celle-là ;
+   - affiche la liste des clés encore à `CHANGEME`.
+
+   Procédure complète côté cluster (saisie console, ordre de déploiement) :
+   `Devver-Inc/kubernetes` → `docs/vault-nouveau-cluster.md`.
 
 ## Limitation connue — jonction sans VIP
 

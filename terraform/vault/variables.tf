@@ -5,7 +5,7 @@ variable "vault_address" {
 }
 
 variable "orgs" {
-  description = "Organisations pour lesquelles créer une policy read-only + un role AppRole dédié"
+  description = "Identifiants de cluster (<org>-<env>, ou anciens noms sans env) : policy read-only + role AppRole infra pour chacun, et structure kubernetes-cluster/ (k8s-secrets.tf) pour ceux au format <org>-<prod|staging|dev>"
   type        = list(string)
   default     = ["prod"]
 }

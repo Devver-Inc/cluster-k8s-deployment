@@ -1,0 +1,77 @@
+---
+# Initialise UN chemin kubernetes-cluster/<org>/<env>/<seed.path> :
+# lit l'existant, calcule les valeurs des clés ABSENTES (generate / static /
+# manual / approle), écrit le tout fusionné — l'existant gagne toujours.
+# Inclus en boucle par 05-vault-k8s.yml (loop_var: seed).
+
+- name: "{{ seed.path }} — lire l'existant"
+  delegate_to: localhost
+  community.hashi_vault.vault_kv2_get:
+    url: "{{ vault_addr }}"
+    auth_method: "{{ vault_auth_method }}"
+    mount_point: "{{ vault_auth_mount_point }}"
+    role_id: "{{ vault_role_id }}"
+    secret_id: "{{ vault_secret_id }}"
+    engine_mount_point: "{{ vault_k8s_kv_mount }}"
+    path: "{{ vault_k8s_prefix }}/{{ seed.path }}"
+  register: _seed_existing
+  # 404 attendu au premier run (chemin pas encore créé)
+  failed_when: false
+  no_log: true
+
+- name: "{{ seed.path }} — échec Vault autre qu'un chemin absent"
+  ansible.builtin.fail:
+    msg: "Lecture de {{ vault_k8s_kv_mount }}/{{ vault_k8s_prefix }}/{{ seed.path }} impossible : {{ _seed_existing.msg | default('?') }}"
+  # Chemin absent = message "Invalid or missing path [...]" de vault_kv2_get
+  # (community.hashi_vault 6.2.0, hvac InvalidPath) : seul cas toléré.
+  when:
+    - _seed_existing.secret is not defined
+    - "'Invalid or missing path' not in (_seed_existing.msg | default(''))"
+
+- name: "{{ seed.path }} — repartir d'un état vide"
+  ansible.builtin.set_fact:
+    _seed_current: "{{ _seed_existing.secret | default({}) }}"
+    _seed_defaults: {}
+  no_log: true
+
+# Inline if Jinja : seule la branche retenue est évaluée — le lookup password
+# n'est appelé que pour les clés en mode generate.
+- name: "{{ seed.path }} — valeurs initiales des clés absentes"
+  ansible.builtin.set_fact:
+    _seed_defaults: >-
+      {{ _seed_defaults | combine({
+           field.name:
+             field.value if field.mode == 'static'
+             else 'CHANGEME' if field.mode == 'manual'
+             else vault_k8s_approle[field.name] if field.mode == 'approle'
+             else lookup('ansible.builtin.password', '/dev/null',
+                         length=field.length | default(40),
+                         chars=field.chars | default(['ascii_letters', 'digits']))
+         }) }}
+  loop: "{{ seed.fields }}"
+  loop_control:
+    loop_var: field
+    label: "{{ field.name }} ({{ field.mode }})"
+  when: field.name not in _seed_current
+  no_log: true
+
+- name: "{{ seed.path }} — écrire (uniquement si des clés manquaient)"
+  delegate_to: localhost
+  community.hashi_vault.vault_kv2_write:
+    url: "{{ vault_addr }}"
+    auth_method: "{{ vault_auth_method }}"
+    mount_point: "{{ vault_auth_mount_point }}"
+    role_id: "{{ vault_role_id }}"
+    secret_id: "{{ vault_secret_id }}"
+    engine_mount_point: "{{ vault_k8s_kv_mount }}"
+    path: "{{ vault_k8s_prefix }}/{{ seed.path }}"
+    data: "{{ _seed_defaults | combine(_seed_current) }}"
+  when: _seed_defaults | length > 0
+  no_log: true
+
+- name: "{{ seed.path }} — noter les clés encore à CHANGEME"
+  ansible.builtin.set_fact:
+    vault_k8s_todo: >-
+      {{ vault_k8s_todo + ((_seed_defaults | combine(_seed_current)) | dict2items
+         | selectattr('value', 'equalto', 'CHANGEME') | map(attribute='key')
+         | map('regex_replace', '^', seed.path + '/') | list) }}

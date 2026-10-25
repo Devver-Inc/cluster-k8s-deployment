@@ -1,5 +1,6 @@
 variable "org" {
-  type = string
+  description = "Nom de l'organisation (sans l'environnement) — ex: acme"
+  type        = string
   # Pas de default volontairement : force à définir "org" dans values.auto.tfvars
   # (voir REPLACE_ME_ORG) pour ce nouveau cluster.
 
@@ -7,10 +8,25 @@ variable "org" {
     condition     = var.org != "REPLACE_ME_ORG"
     error_message = "Ce dossier est le TEMPLATE clusters/_template/ — remplacer REPLACE_ME_ORG par le vrai nom de l'org dans values.auto.tfvars (et backend.hcl) avant tout plan/apply. Voir clusters/_template/README.md."
   }
+
+  validation {
+    condition     = can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", var.org))
+    error_message = "org doit être en minuscules (a-z, 0-9, '-') — il sert de chemin Vault kubernetes-cluster/<org>/<env>/ et de nom de VM."
+  }
+}
+
+variable "env" {
+  description = "Environnement du cluster — chemin Vault kubernetes-cluster/<org>/<env>/"
+  type        = string
+
+  validation {
+    condition     = contains(["prod", "staging", "dev"], var.env)
+    error_message = "env doit valoir prod, staging ou dev (liste figée : terraform/vault/k8s-secrets.tf en déduit org/env depuis l'identifiant <org>-<env>)."
+  }
 }
 
 variable "org_subnet_index" {
-  description = "Registre centralisé { org => subnet_index }, injecté via le symlink ip-plan.auto.tfvars"
+  description = "Registre centralisé { <org>-<env> => subnet_index }, injecté via le symlink ip-plan.auto.tfvars"
   type        = map(number)
 }
 
@@ -105,7 +121,7 @@ variable "vault_role_id" {
 }
 
 variable "vault_secret_id" {
-  description = "Secret ID AppRole (vault write -f auth/terraform-orgs/role/terraform-REPLACE_ME_ORG/secret-id)"
+  description = "Secret ID AppRole (vault write -f auth/terraform-orgs/role/terraform-<org>-<env>/secret-id)"
   type        = string
   sensitive   = true
 }

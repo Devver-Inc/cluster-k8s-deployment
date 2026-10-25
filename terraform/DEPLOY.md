@@ -76,6 +76,16 @@ nouvelle org, et clone `vm_secret_template` → `devver-infra-deployment/<org>`
 (une seule fois, jamais réécrit ensuite) — sans jamais toucher aux orgs déjà
 existantes.
 
+Pour un cluster nommé `<org>-<prod|staging|dev>` (format des nouveaux
+clusters, voir `clusters/_template/README.md`), le même apply crée aussi la
+structure des secrets applicatifs ([`vault/k8s-secrets.tf`](vault/k8s-secrets.tf)) :
+le mount KV `kubernetes-cluster` (une fois), l'auth Kubernetes
+`k8s-<org>-<env>`, les policies `k8s-<org>-<env>-{platform,ghcr,tenant,backend}`,
+les roles ESO et l'AppRole `devver-apps/backend-<org>-<env>`. Aucune valeur :
+elles sont initialisées par `ansible/playbooks/05-vault-k8s.yml` après
+l'installation de RKE2. Les anciens identifiants sans suffixe d'env sont
+ignorés par cette partie.
+
 Écrire les credentials Proxmox si pas déjà fait (secret partagé, une fois) :
 
 ```bash

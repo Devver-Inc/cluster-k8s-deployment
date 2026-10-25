@@ -191,6 +191,55 @@ resource "vault_policy" "ci" {
       capabilities = ["list", "read", "delete"]
     }
 
+    # --- Secrets applicatifs des clusters (k8s-secrets.tf + playbook 05) ---
+    # terraform-ci peut modifier sa propre policy (sys/policies/acl/terraform-*) :
+    # les resources de k8s-secrets.tf dépendent de vault_policy.ci, donc ces
+    # droits sont en place (Vault réévalue les policies à chaque requête) avant
+    # qu'elles ne soient créées, sans apply manuel.
+    path "sys/mounts/kubernetes-cluster" {
+      capabilities = ["create", "read", "update", "delete", "sudo"]
+    }
+
+    path "sys/auth/k8s-*" {
+      capabilities = ["create", "read", "update", "delete", "sudo"]
+    }
+
+    path "sys/mounts/auth/k8s-*" {
+      capabilities = ["read"]
+    }
+
+    # config (kubernetes_host/CA/reviewer, écrite par le playbook 05) + roles
+    path "auth/k8s-*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+    path "sys/auth/devver-apps" {
+      capabilities = ["create", "read", "update", "delete", "sudo"]
+    }
+
+    path "sys/mounts/auth/devver-apps" {
+      capabilities = ["read"]
+    }
+
+    # roles + role-id (lecture) + secret-id (génération par le playbook 05)
+    path "auth/devver-apps/role/*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+    path "sys/policies/acl/k8s-*" {
+      capabilities = ["create", "read", "update", "delete", "list"]
+    }
+
+    # Initialisation des valeurs (playbook 05) : jamais de suppression
+    # automatique — la purge de kubernetes-cluster/<org>/<env> est manuelle.
+    path "kubernetes-cluster/data/*" {
+      capabilities = ["create", "read", "update"]
+    }
+
+    path "kubernetes-cluster/metadata/*" {
+      capabilities = ["list", "read"]
+    }
+
     path "auth/token/create" {
       capabilities = ["create", "update"]
     }

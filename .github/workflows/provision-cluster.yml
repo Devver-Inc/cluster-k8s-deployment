@@ -300,7 +300,7 @@ jobs:
             echo "Inventaire inchangé, rien à committer."
           else
             git commit -m "chore: update ansible inventory for ${{ matrix.org }}"
-            git push origin HEAD:main
+            git push origin "HEAD:${{ github.ref_name }}"
           fi
 
   # --- Ajout de worker ---------------------------------------------------
@@ -353,7 +353,7 @@ jobs:
             echo "Inventaire inchangé, rien à committer."
           else
             git commit -m "chore: update ansible inventory for ${{ matrix.org }}"
-            git push origin HEAD:main
+            git push origin "HEAD:${{ github.ref_name }}"
           fi
 
   # --- Build de l'image Docker Ansible (réutilisée par configure + remove-worker) ---
@@ -433,8 +433,9 @@ jobs:
         shell: bash
         run: git config --global --add safe.directory '*'
 
-      # ref: main (pas le SHA implicite de l'event, figé au déclenchement du
-      # run) — ce job dépend de create-cluster/add-worker (needs:), qui
+      # ref: github.ref_name = la branche du run (main en usage normal, ou la
+      # branche choisie dans workflow_dispatch pour un test) — pas le SHA
+      # implicite de l'event, figé au déclenchement du run — ce job dépend de create-cluster/add-worker (needs:), qui
       # committent et PUSHENT l'inventaire Ansible généré PENDANT ce même
       # run, après que le run ait démarré. Sans ref: explicite,
       # actions/checkout@v4 checkoute github.sha (l'état du repo au moment
@@ -444,7 +445,7 @@ jobs:
       # commit existait pourtant déjà sur main au moment du checkout.
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.ref_name }}
 
       # Même AppRole terraform-ci que Terraform (voir terraform/README.md) —
       # sa policy couvre déjà la lecture/écriture sur devver-infra-deployment/data/*.
@@ -495,6 +496,15 @@ jobs:
           ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/01-base.yml
           ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/02-dependencies.yml
           ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/03-cluster-init.yml
+
+          # Secrets applicatifs (ESO ↔ Vault) : uniquement pour les clusters
+          # nommés <org>-<env>, seuls à avoir une structure kubernetes-cluster/
+          # (terraform/vault/k8s-secrets.tf). Idempotent, relançable sans risque.
+          if [[ "${{ matrix.org }}" =~ ^[a-z0-9][a-z0-9-]*-(prod|staging|dev)$ ]]; then
+            ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/05-vault-k8s.yml
+          else
+            echo "Cluster '${{ matrix.org }}' sans suffixe d'env : 05-vault-k8s.yml ignoré."
+          fi
 
   # configure tourne en root dans son conteneur (symlink group_vars,
   # inventaire éventuellement modifié...) — ce job à plat reprend possession
@@ -656,7 +666,7 @@ jobs:
             echo "Inventaire inchangé, rien à committer."
           else
             git commit -m "chore: update ansible inventory for ${{ matrix.org }}"
-            git push origin HEAD:main
+            git push origin "HEAD:${{ github.ref_name }}"
           fi
 
   # Tout ce que remove-worker écrit dans le workspace (.terraform/, clé SSH
