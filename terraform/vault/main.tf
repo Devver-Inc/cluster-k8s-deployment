@@ -79,6 +79,12 @@ resource "vault_kv_secret_v2" "org_secret" {
     ssh_private_key = data.vault_kv_secret_v2.vm_secret_template.data["ssh_private_key"]
   })
 
+  # À la suppression du cluster : purge complète (métadonnées + toutes les
+  # versions). Sans ça, Vault ne fait qu'un soft-delete de la dernière version
+  # et les précédentes (mot de passe VM, clé SSH, kubeconfig admin) restent
+  # lisibles — constaté sur test-dev.
+  delete_all_versions = true
+
   lifecycle {
     ignore_changes = [data_json]
   }
@@ -229,14 +235,15 @@ resource "vault_policy" "ci" {
       capabilities = ["create", "read", "update", "delete", "list"]
     }
 
-    # Initialisation des valeurs (playbook 05) : jamais de suppression
-    # automatique — la purge de kubernetes-cluster/<org>/<env> est manuelle.
+    # Initialisation des valeurs (playbook 05) + purge de
+    # kubernetes-cluster/<org>/<env> par le job vault-cleanup à la
+    # suppression du cluster (metadata delete = toutes les versions).
     path "kubernetes-cluster/data/*" {
       capabilities = ["create", "read", "update"]
     }
 
     path "kubernetes-cluster/metadata/*" {
-      capabilities = ["list", "read"]
+      capabilities = ["list", "read", "delete"]
     }
 
     path "auth/token/create" {

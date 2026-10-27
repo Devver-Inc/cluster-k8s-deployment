@@ -77,6 +77,12 @@ ansible-playbook -i "$INV" -e cluster_org=<org> -e ansible_ssh_private_key_file=
    kubeconfig (adapté pour pointer vers l'IP réelle plutôt que `127.0.0.1`),
    écrit `kubeconfig` + `rke2_token` dans Vault sans écraser les champs déjà
    présents (`vm_user`, `ssh_public_key`, ...).
+   Avant de démarrer le 1er master, il dépose dans
+   `/var/lib/rancher/rke2/server/manifests/` (appliqués par RKE2 lui-même) :
+   MetalLB (chart `metallb_chart_version`), un pool limité à `metallb_ip`
+   (IP réservée par Terraform, passée par l'inventaire) annoncé en L2, et un
+   `HelmChartConfig` qui met le Service de Traefik — ingress par défaut de
+   RKE2 >= 1.36 — en `LoadBalancer` sur cette IP.
 4. **`04-remove-node.yml`** — désinstalle RKE2 (`rke2-killall.sh` puis
    `rke2-uninstall.sh`) sur un worker déjà drainé côté Kubernetes, juste
    avant que Terraform ne détruise sa VM. **Toujours** lancé avec `--limit`

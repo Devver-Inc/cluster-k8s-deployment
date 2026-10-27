@@ -5,3 +5,7 @@ rke2_install_type: agent
 firewalld_ports:
   - { port: 10250, proto: tcp }   # kubelet
   - { port: 8472, proto: udp }    # VXLAN (Flannel CNI)
+  - { port: 80, proto: tcp }      # Traefik (HTTP)
+  - { port: 443, proto: tcp }     # Traefik (HTTPS)
+  - { port: 7946, proto: tcp }    # MetalLB memberlist
+  - { port: 7946, proto: udp }    # MetalLB memberlist

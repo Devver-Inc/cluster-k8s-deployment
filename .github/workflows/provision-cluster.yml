@@ -798,3 +798,27 @@ jobs:
       - name: Terraform apply (remove org structure)
         working-directory: terraform/vault
         run: terraform apply -auto-approve -input=false -var='orgs=${{ steps.orgs.outputs.orgs }}'
+
+      # Secrets applicatifs (écrits par le playbook 05, l'ops et le backend,
+      # donc hors du state Terraform) : purge récursive de
+      # kubernetes-cluster/<org>/<env>/, toutes versions comprises. Clusters
+      # <org>-<env> uniquement (les anciens n'ont rien sous ce mount).
+      - name: Purge kubernetes-cluster/<org>/<env>
+        run: |
+          set -euo pipefail
+          if [[ "${{ matrix.org }}" =~ ^([a-z0-9][a-z0-9-]*)-(prod|staging|dev)$ ]]; then
+            prefix="${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
+            purge() {
+              local keys
+              keys=$(vault kv list -format=json "kubernetes-cluster/$1" 2>/dev/null | jq -r '.[]' || true)
+              for k in ${keys}; do
+                case "${k}" in
+                  */) purge "$1/${k%/}" ;;
+                  *)  vault kv metadata delete "kubernetes-cluster/$1/${k}" && echo "purgé : kubernetes-cluster/$1/${k}" ;;
+                esac
+              done
+            }
+            purge "${prefix}"
+          else
+            echo "Cluster '${{ matrix.org }}' sans suffixe d'env : rien sous kubernetes-cluster/."
+          fi

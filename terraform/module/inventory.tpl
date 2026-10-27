@@ -14,3 +14,8 @@ ${name} ansible_host=${node.ip} ansible_user=${vm_user}
 [k8s_cluster:children]
 server
 agent
+
+[k8s_cluster:vars]
+# IP de l'ingress (Traefik, Service LoadBalancer annoncé par MetalLB) —
+# utilisée par ansible/playbooks/03-cluster-init.yml.
+metallb_ip=${metallb_ip}

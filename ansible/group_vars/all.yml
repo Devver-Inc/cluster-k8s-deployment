@@ -20,7 +20,15 @@ vault_kv_mount: devver-infra-deployment
 vault_cluster_secret_path: "{{ cluster_org | regex_replace(cluster_id_regex, '\\1/\\2') }}"
 
 # Version RKE2 installée par 02-dependencies.yml (script officiel get.rke2.io).
-rke2_version: "v1.30.5+rke2r1"
+rke2_version: "v1.36.5+rke2r1"
+# >= v1.36 : Traefik est l'ingress controller par défaut des nouveaux clusters
+# (ingress-nginx retiré upstream). Ne s'applique qu'à l'installation : un
+# cluster existant n'est pas mis à jour par ce playbook.
+
+# MetalLB (déployé par RKE2 via /var/lib/rancher/rke2/server/manifests, voir
+# 03-cluster-init.yml) : annonce en L2 l'IP réservée par Terraform au cluster
+# (metallb_ip, inventaire) et la donne au Service LoadBalancer de Traefik.
+metallb_chart_version: "0.16.1"
 
 # IP du 1er master du groupe [server] — point d'entrée unique pour la
 # jonction des autres masters/agents (pas de VIP/HAProxy pour l'instant,

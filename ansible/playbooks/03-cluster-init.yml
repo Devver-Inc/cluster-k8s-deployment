@@ -25,6 +25,85 @@
         state: directory
         mode: "0755"
 
+    # --- Ingress : Traefik (défaut RKE2 >= 1.36) sur l'IP réservée par Terraform
+    # Manifestes "auto-deploy" de RKE2 : tout fichier de ce dossier est appliqué
+    # (et ré-appliqué s'il change) par RKE2 lui-même, avant toute autre chose.
+    - name: Vérifier que l'IP de l'ingress est fournie par l'inventaire
+      ansible.builtin.assert:
+        that: metallb_ip is defined and metallb_ip is match('^([0-9]{1,3}\\.){3}[0-9]{1,3}$')
+        fail_msg: "metallb_ip absent de l'inventaire (terraform/module/inventory.tpl) — relancer terraform apply du cluster."
+        quiet: true
+
+    - name: Créer le dossier des manifestes auto-déployés par RKE2
+      ansible.builtin.file:
+        path: /var/lib/rancher/rke2/server/manifests
+        state: directory
+        mode: "0700"
+
+    - name: MetalLB (HelmChart déployé par RKE2)
+      ansible.builtin.copy:
+        dest: /var/lib/rancher/rke2/server/manifests/devver-metallb.yaml
+        mode: "0600"
+        content: |
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: metallb-system
+          ---
+          apiVersion: helm.cattle.io/v1
+          kind: HelmChart
+          metadata:
+            name: metallb
+            namespace: kube-system
+          spec:
+            repo: https://metallb.github.io/metallb
+            chart: metallb
+            version: "{{ metallb_chart_version }}"
+            targetNamespace: metallb-system
+
+    # Fichier séparé : ses CRD n'existent qu'une fois le chart MetalLB installé.
+    # Le contrôleur de déploiement de RKE2 doit réessayer l'application tant
+    # qu'elles manquent — à confirmer au premier déploiement.
+    - name: MetalLB — pool limité à l'IP de l'ingress, annoncé en L2
+      ansible.builtin.copy:
+        dest: /var/lib/rancher/rke2/server/manifests/devver-metallb-pool.yaml
+        mode: "0600"
+        content: |
+          apiVersion: metallb.io/v1beta1
+          kind: IPAddressPool
+          metadata:
+            name: ingress
+            namespace: metallb-system
+          spec:
+            addresses:
+              - {{ metallb_ip }}/32
+          ---
+          apiVersion: metallb.io/v1beta1
+          kind: L2Advertisement
+          metadata:
+            name: ingress
+            namespace: metallb-system
+          spec:
+            ipAddressPools:
+              - ingress
+
+    - name: Traefik — Service LoadBalancer sur l'IP de l'ingress
+      ansible.builtin.copy:
+        dest: /var/lib/rancher/rke2/server/manifests/rke2-traefik-config.yaml
+        mode: "0600"
+        content: |
+          apiVersion: helm.cattle.io/v1
+          kind: HelmChartConfig
+          metadata:
+            name: rke2-traefik
+            namespace: kube-system
+          spec:
+            valuesContent: |-
+              service:
+                type: LoadBalancer
+                annotations:
+                  metallb.io/loadBalancerIPs: "{{ metallb_ip }}"
+
     - name: "Écrire la config RKE2 du premier master (pas de champ server, c'est lui le point d'entrée)"
       ansible.builtin.copy:
         dest: /etc/rancher/rke2/config.yaml

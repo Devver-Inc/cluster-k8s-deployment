@@ -11,3 +11,7 @@ firewalld_ports:
   - { port: 10251, proto: tcp }   # kube-scheduler
   - { port: 10252, proto: tcp }   # kube-controller-manager
   - { port: 8472, proto: udp }    # VXLAN (Flannel CNI)
+  - { port: 80, proto: tcp }      # Traefik (HTTP)
+  - { port: 443, proto: tcp }     # Traefik (HTTPS)
+  - { port: 7946, proto: tcp }    # MetalLB memberlist
+  - { port: 7946, proto: udp }    # MetalLB memberlist
