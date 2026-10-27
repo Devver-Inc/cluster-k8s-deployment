@@ -1,7 +1,7 @@
 ---
 # Initialise UN chemin kubernetes-cluster/<org>/<env>/<seed.path> :
 # lit l'existant, calcule les valeurs des clés ABSENTES (generate / static /
-# manual / approle), écrit le tout fusionné — l'existant gagne toujours.
+# manual), écrit le tout fusionné — l'existant gagne toujours.
 # Inclus en boucle par 05-vault-k8s.yml (loop_var: seed).
 
 - name: "{{ seed.path }} — lire l'existant"
@@ -43,7 +43,6 @@
            field.name:
              field.value if field.mode == 'static'
              else 'CHANGEME' if field.mode == 'manual'
-             else vault_k8s_approle[field.name] if field.mode == 'approle'
              else lookup('ansible.builtin.password', '/dev/null',
                          length=field.length | default(40),
                          chars=field.chars | default(['ascii_letters', 'digits']))

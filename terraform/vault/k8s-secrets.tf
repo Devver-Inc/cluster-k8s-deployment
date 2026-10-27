@@ -5,7 +5,8 @@
 #   kubernetes-cluster/<org>/<env>/clients/<namespace>/*   secrets des déploiements clients
 #
 # Consommés dans le cluster par External Secrets Operator (ESO) via l'auth
-# Kubernetes k8s-<org>-<env> (un mount par cluster : CA + API propres).
+# Kubernetes k8s-<org>-<env> (un mount par cluster : CA + API propres), comme
+# le backend Devver (role "backend").
 #
 # Ce Terraform ne crée QUE la structure (mount, auth, policies, roles) — jamais
 # de valeur : le contenu est initialisé par ansible/playbooks/05-vault-k8s.yml
@@ -172,25 +173,19 @@ resource "vault_kubernetes_auth_backend_role" "eso_tenant" {
   token_ttl                        = 3600
 }
 
-# --- AppRole du backend Devver ----------------------------------------------------
-# Mount séparé de terraform-orgs (réservé à l'infra). Le secret_id n'est pas
-# géré ici (il serait dans le state) : généré par le playbook 05 et déposé
-# dans kubernetes-cluster/<org>/<env>/backend (VAULT_ROLE_ID / VAULT_SECRET_ID).
-
-resource "vault_auth_backend" "devver_apps" {
-  type        = "approle"
-  path        = "devver-apps"
-  description = "AppRole des applications Devver (backend) — écriture des secrets clients"
-
-  depends_on = [vault_policy.ci]
-}
-
-resource "vault_approle_auth_backend_role" "backend" {
+# --- Backend Devver -----------------------------------------------------------
+# Le backend tourne dans le cluster : il s'authentifie comme ESO, avec le jeton
+# de son ServiceAccount (court, renouvelé par le kubelet). Aucun secret statique
+# à stocker ni à renouveler. SA créé par Devver-Inc/kubernetes
+# (backend-service/serviceaccount.yaml).
+resource "vault_kubernetes_auth_backend_role" "backend" {
   for_each = local.k8s_clusters
 
-  backend        = vault_auth_backend.devver_apps.path
-  role_name      = "backend-${each.key}"
-  token_policies = [vault_policy.k8s_backend[each.key].name]
-  token_ttl      = 3600
-  token_max_ttl  = 14400
+  backend                          = vault_auth_backend.k8s[each.key].path
+  role_name                        = "backend"
+  bound_service_account_names      = ["backend-service"]
+  bound_service_account_namespaces = ["devver-backend-service"]
+  token_policies                   = [vault_policy.k8s_backend[each.key].name]
+  token_ttl                        = 3600
+  token_max_ttl                    = 14400
 }

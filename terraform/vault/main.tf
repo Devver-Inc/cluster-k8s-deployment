@@ -225,19 +225,6 @@ resource "vault_policy" "ci" {
       capabilities = ["create", "read", "update", "delete", "list"]
     }
 
-    path "sys/auth/devver-apps" {
-      capabilities = ["create", "read", "update", "delete", "sudo"]
-    }
-
-    path "sys/mounts/auth/devver-apps" {
-      capabilities = ["read"]
-    }
-
-    # roles + role-id (lecture) + secret-id (génération par le playbook 05)
-    path "auth/devver-apps/role/*" {
-      capabilities = ["create", "read", "update", "delete", "list"]
-    }
-
     path "sys/policies/acl/k8s-*" {
       capabilities = ["create", "read", "update", "delete", "list"]
     }

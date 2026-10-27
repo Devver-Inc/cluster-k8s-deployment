@@ -37,7 +37,6 @@
     vault_k8s_env: "{{ cluster_org | regex_replace(vault_k8s_id_regex, '\\2') }}"
     vault_k8s_prefix: "{{ vault_k8s_org }}/{{ vault_k8s_env }}"
     vault_k8s_auth_mount: "k8s-{{ cluster_org }}"
-    vault_k8s_backend_role: "backend-{{ cluster_org }}"
     vault_k8s_todo: []
 
   tasks:
@@ -122,56 +121,6 @@
       no_log: true
 
     # --- 3. Initialisation des secrets ----------------------------------------
-
-    # AppRole du backend : un secret_id n'est généré que si backend/ n'en a
-    # pas encore (sinon chaque run en créerait un nouveau, inutilisé).
-    - name: Lire backend/ (présence de l'AppRole)
-      delegate_to: localhost
-      community.hashi_vault.vault_kv2_get:
-        url: "{{ vault_addr }}"
-        auth_method: "{{ vault_auth_method }}"
-        mount_point: "{{ vault_auth_mount_point }}"
-        role_id: "{{ vault_role_id }}"
-        secret_id: "{{ vault_secret_id }}"
-        engine_mount_point: "{{ vault_k8s_kv_mount }}"
-        path: "{{ vault_k8s_prefix }}/backend"
-      register: _backend_existing
-      failed_when: false
-      no_log: true
-
-    - name: Générer les identifiants AppRole du backend
-      when: "'VAULT_SECRET_ID' not in (_backend_existing.secret | default({}))"
-      block:
-        - name: "Lire le role_id de {{ vault_k8s_backend_role }}"
-          delegate_to: localhost
-          community.hashi_vault.vault_read:
-            url: "{{ vault_addr }}"
-            auth_method: "{{ vault_auth_method }}"
-            mount_point: "{{ vault_auth_mount_point }}"
-            role_id: "{{ vault_role_id }}"
-            secret_id: "{{ vault_secret_id }}"
-            path: "auth/devver-apps/role/{{ vault_k8s_backend_role }}/role-id"
-          register: _backend_role_id
-          no_log: true
-
-        - name: "Générer un secret_id pour {{ vault_k8s_backend_role }}"
-          delegate_to: localhost
-          community.hashi_vault.vault_write:
-            url: "{{ vault_addr }}"
-            auth_method: "{{ vault_auth_method }}"
-            mount_point: "{{ vault_auth_mount_point }}"
-            role_id: "{{ vault_role_id }}"
-            secret_id: "{{ vault_secret_id }}"
-            path: "auth/devver-apps/role/{{ vault_k8s_backend_role }}/secret-id"
-          register: _backend_secret_id
-          no_log: true
-
-        - name: Mémoriser les identifiants AppRole
-          ansible.builtin.set_fact:
-            vault_k8s_approle:
-              VAULT_ROLE_ID: "{{ _backend_role_id.data.data.role_id }}"
-              VAULT_SECRET_ID: "{{ _backend_secret_id.data.data.secret_id }}"
-          no_log: true
 
     - name: Initialiser chaque chemin du catalogue
       ansible.builtin.include_tasks: tasks/vault-k8s-seed-path.yml

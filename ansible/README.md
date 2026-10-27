@@ -95,7 +95,7 @@ ansible-playbook -i "$INV" -e cluster_org=<org> -e ansible_ssh_private_key_file=
      [`terraform/vault/k8s-secrets.tf`](../terraform/vault/k8s-secrets.tf) ;
    - initialise `kubernetes-cluster/<org>/<env>/*` d'après le catalogue
      [`vars/vault-k8s-secrets.yml`](vars/vault-k8s-secrets.yml) : valeurs
-     générées, fixes, AppRole du backend, ou `CHANGEME` à saisir dans la
+     générées, fixes, ou `CHANGEME` à saisir dans la
      console. **Une clé existante n'est jamais réécrite** : relançable sans
      risque, et ajouter une clé au catalogue n'ajoute que celle-là ;
    - affiche la liste des clés encore à `CHANGEME`.
