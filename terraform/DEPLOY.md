@@ -309,6 +309,18 @@ jamais via un commit git — aucun push ne se reproduit donc automatiquement
 pour redéclencher `create-cluster` une fois les secrets prêts. Deux options
 pour relancer :
 - Pousser un commit (même trivial) touchant `terraform/clusters/<org>/`.
+> **Création d'un cluster entièrement par la pipeline (2 lancements)** :
+> 1. pousser `terraform/clusters/<org>-<env>/` sur la branche, puis
+>    `workflow_dispatch` (input `org=<org>-<env>`) : le job `detect` crée la
+>    structure Vault, constate que les secrets VM sont vides et **s'arrête**
+>    (warning, aucune VM créée) ;
+> 2. saisir `vm_password`, `ssh_public_key`, `ssh_private_key` dans
+>    `devver-infra-deployment/<org>/<env>` ;
+> 3. relancer le même `workflow_dispatch` : création des VMs puis `configure`.
+>
+> Ce garde-fou est indispensable : avec `ignore_changes` sur le compte
+> cloud-init, des VMs créées sans clé SSH ne seraient plus jamais corrigées.
+
 - Ou lancer **manuellement** `provision-cluster.yml` en `workflow_dispatch`
   (**Actions > Provision cluster > Run workflow**, input `org`) — filet de
   sécurité qui ne fait toujours QUE `create-cluster` pour l'org donnée,

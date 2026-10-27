@@ -170,7 +170,31 @@ jobs:
           set -euo pipefail
 
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            org_json="$(jq -cn --arg org "${{ inputs.org }}" '[$org]')"
+            org="${{ inputs.org }}"
+            org_json="$(jq -cn --arg org "${org}" '[$org]')"
+
+            # Garde-fou : la structure Vault vient d'être créée (step
+            # précédent) avec les valeurs VIDES de vm_secret_template. Créer
+            # les VMs maintenant les ferait démarrer sans clé SSH ni mot de
+            # passe — irréparable ensuite (ignore_changes sur user_account).
+            # Tant que les secrets VM ne sont pas saisis : on s'arrête là.
+            if [[ "${org}" =~ ^([a-z0-9][a-z0-9-]*)-(prod|staging|dev)$ ]]; then
+              infra_path="${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
+            else
+              infra_path="${org}"
+            fi
+            missing="$(vault kv get -format=json "devver-infra-deployment/${infra_path}" \
+              | jq -r '.data.data as $d | ["vm_user","vm_password","ssh_public_key","ssh_private_key"]
+                       | map(select(($d[.] // "") | (length == 0 or test("CHANGE_?ME"; "i"))))
+                       | join(", ")')"
+            if [[ -n "${missing}" ]]; then
+              echo "::warning::detect: structure Vault prête pour '${org}', mais secrets VM non saisis (${missing}) dans devver-infra-deployment/${infra_path}. Les saisir, puis relancer ce workflow (workflow_dispatch, org=${org}). Aucune VM créée."
+              for k in orgs_create orgs_delete orgs_add_worker orgs_remove_worker orgs_configure; do
+                echo "${k}=[]" >> "$GITHUB_OUTPUT"
+              done
+              exit 0
+            fi
+
             echo "orgs_create=${org_json}" >> "$GITHUB_OUTPUT"
             echo "orgs_delete=[]" >> "$GITHUB_OUTPUT"
             echo "orgs_add_worker=[]" >> "$GITHUB_OUTPUT"
