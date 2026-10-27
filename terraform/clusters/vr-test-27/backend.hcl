@@ -2,7 +2,7 @@
 # key dédiée à ce cluster.
 
 bucket = "devver-tfstate"
-key    = "clusters/REPLACE_ME_ORG-REPLACE_ME_ENV/terraform.tfstate"
+key    = "clusters/vr27-dev/terraform.tfstate"
 region = "eu-central-003"
 endpoints = {
   s3 = "https://s3.eu-central-003.backblazeb2.com"
