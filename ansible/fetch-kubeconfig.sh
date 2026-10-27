@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Récupère kubeconfig depuis Vault (devver-infra-deployment/<org>) et l'écrit
+# Récupère kubeconfig depuis Vault (devver-infra-deployment/<org>/<env>) et l'écrit
 # dans un fichier temporaire local, utilisé comme KUBECONFIG pour les
 # commandes kubectl (drain, delete node) du job remove-worker — avant que
 # Terraform ne détruise la VM du worker concerné.
@@ -34,12 +34,19 @@ if [[ -z "${VAULT_TOKEN:-}" ]]; then
   fi
   export VAULT_TOKEN
 fi
+# Chemin Vault : <org>/<env> pour un cluster <org>-<env> (même découpage que
+# kubernetes-cluster/<org>/<env>), identifiant à plat pour les anciens clusters.
+if [[ "${org}" =~ ^([a-z0-9][a-z0-9-]*)-(prod|staging|dev)$ ]]; then
+  vault_path="${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
+else
+  vault_path="${org}"
+fi
 
 # -format=json + jq -r plutôt que `vault kv get -field=` : voir le
 # commentaire équivalent dans fetch-ssh-key.sh.
-fetched_kubeconfig=$(vault kv get -format=json "devver-infra-deployment/${org}" | jq -r '.data.data.kubeconfig')
+fetched_kubeconfig=$(vault kv get -format=json "devver-infra-deployment/${vault_path}" | jq -r '.data.data.kubeconfig')
 if [[ -z "${fetched_kubeconfig}" || "${fetched_kubeconfig}" == "null" ]]; then
-  echo "fetch-kubeconfig.sh: échec de lecture de kubeconfig sur devver-infra-deployment/${org} (cluster pas encore initialisé ?)." >&2
+  echo "fetch-kubeconfig.sh: échec de lecture de kubeconfig sur devver-infra-deployment/${vault_path} (cluster pas encore initialisé ?)." >&2
   return 1 2>/dev/null || true
 fi
 

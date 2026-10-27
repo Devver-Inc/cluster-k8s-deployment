@@ -170,4 +170,4 @@
 
     - name: Cluster RKE2 initialisé
       ansible.builtin.debug:
-        msg: "Cluster '{{ cluster_org }}' prêt — kubeconfig et rke2_token écrits dans devver-infra-deployment/{{ cluster_org }}."
+        msg: "Cluster '{{ cluster_org }}' prêt — kubeconfig et rke2_token écrits dans devver-infra-deployment/{{ vault_cluster_secret_path }}."

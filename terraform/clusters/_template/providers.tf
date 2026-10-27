@@ -35,7 +35,7 @@ provider "proxmox" {
 }
 
 # Identifiant unique du cluster = nom du dossier clusters/<org>-<env>/ — c'est
-# lui que manipulent la CI, le registre IP, devver-infra-deployment/ et les
+# lui que manipulent la CI, le registre IP, les noms d'auth/policies Vault et les
 # noms de VM (le module l'appelle encore "org" par historique).
 locals {
   cluster_id = "${var.org}-${var.env}"

@@ -68,11 +68,11 @@ Mount KV v2 unique : **`devver-infra-deployment`**, avec à sa racine :
 - `devver-infra-deployment/s3-backend` : credentials B2 (`key_id`, `application_key`) pour le backend S3, partagés entre toutes les orgs.
 - `devver-infra-deployment/ansible` : réservé pour un usage futur, pas encore géré par ce Terraform (pas de policy dessus pour l'instant).
 - `devver-infra-deployment/vm_secret_template` : secret "template" (`vm_user`, `ssh_public_key`, `vm_password`/`ssh_private_key` en placeholders) saisi manuellement une fois, cloné vers chaque nouvelle org.
-- `devver-infra-deployment/<org>` : copie du template pour cette org — créée automatiquement par `vault/` (voir plus bas). `vm_password`/`ssh_private_key` y restent les placeholders du template tant que tu ne les as pas remplacés à la main ; une fois remplacés, plus jamais écrasés par un futur apply.
+- `devver-infra-deployment/<org>/<env>` : copie du template pour cette org — créée automatiquement par `vault/` (voir plus bas). `vm_password`/`ssh_private_key` y restent les placeholders du template tant que tu ne les as pas remplacés à la main ; une fois remplacés, plus jamais écrasés par un futur apply.
 
 Une policy read-only + un role AppRole dédiés existent par org (accès à `proxmox` + `<org>`), créés par `vault/`. Un role à part (`terraform-backblaze`, TTL court) ne donne accès qu'à `devver-infra-deployment/s3-backend`.
 
-### Comment `devver-infra-deployment/<org>` est créé, sans jamais être réécrit
+### Comment `devver-infra-deployment/<org>/<env>` est créé, sans jamais être réécrit
 
 `vault/main.tf` contient une resource `vault_kv_secret_v2.org_secret` (`for_each` sur
 la liste des orgs) qui clone `vm_secret_template` vers `<org>` — **mais seulement à la
@@ -155,7 +155,7 @@ terraform apply -var='orgs=["prod","<nouvelle-org>"]'
 ```
 
 Ça crée (ou laisse intact si déjà existant) : le mount KV, la policy + role AppRole de
-chaque org, et le secret `devver-infra-deployment/<org>` cloné depuis le template.
+chaque org, et le secret `devver-infra-deployment/<org>/<env>` cloné depuis le template.
 
 Écrire les credentials Proxmox si pas déjà fait :
 ```bash
@@ -171,7 +171,7 @@ vault write -f auth/terraform-orgs/role/terraform-prod/secret-id
 
 ### 2. Action manuelle — compléter les secrets de l'org
 
-Dans l'UI Vault (ou CLI), sur `devver-infra-deployment/<org>` fraîchement créé :
+Dans l'UI Vault (ou CLI), sur `devver-infra-deployment/<org>/<env>` fraîchement créé :
 remplacer les placeholders `vm_password`/`ssh_private_key` par de vraies valeurs, ou
 ajuster `vm_user`/`ssh_public_key` si cette org a besoin de credentials différents du
 template. Ces valeurs ne seront plus jamais écrasées par Terraform.
@@ -205,7 +205,7 @@ workers additionnels — convention RKE2 type `lablabs.rke2`).
    (remplacer `REPLACE_ME_ORG`, recréer le symlink `ip-plan.auto.tfvars`).
 2. Ajouter l'org à `org_subnet_index` dans `ip-plan.auto.tfvars` (prochain index libre).
 3. Étape 1 : ajouter l'org à `vault/` (`terraform apply -var='orgs=["prod","<org>"]'`), générer son `secret_id`.
-4. Étape 2 : compléter `vm_password`/`ssh_private_key` (et ajuster le reste si besoin) dans `devver-infra-deployment/<org>`.
+4. Étape 2 : compléter `vm_password`/`ssh_private_key` (et ajuster le reste si besoin) dans `devver-infra-deployment/<org>/<env>`.
 5. Étape 3 : `terraform init/plan/apply` dans `clusters/<org>/`.
 
 ## Pipeline CI

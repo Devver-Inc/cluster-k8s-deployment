@@ -72,7 +72,10 @@ terraform apply -var="orgs=${new_orgs}"
 ```
 
 Crée : le mount KV `devver-infra-deployment`, la policy + role AppRole pour la
-nouvelle org, et clone `vm_secret_template` → `devver-infra-deployment/<org>`
+nouvelle org, et clone `vm_secret_template` → `devver-infra-deployment/<org>/<env>`
+(`<org>/<env>` pour un cluster `<org>-<env>`, même découpage que
+`kubernetes-cluster/<org>/<env>` ; les anciens identifiants sans env restent
+à plat, ex : `devver-infra-deployment/prod`)
 (une seule fois, jamais réécrit ensuite) — sans jamais toucher aux orgs déjà
 existantes.
 

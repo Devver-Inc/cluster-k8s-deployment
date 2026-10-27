@@ -5,7 +5,7 @@ appliquer ce dossier tel quel — c'est un modèle, pas un cluster réel.
 
 Un cluster est identifié par **`<org>-<env>`** (ex: `acme-prod`), avec
 `env` ∈ `prod | staging | dev`. Cet identifiant est le nom du dossier, la clé
-du registre IP, le chemin `devver-infra-deployment/<org>-<env>` et le préfixe
+du registre IP, le chemin `devver-infra-deployment/<org>/<env>` et le préfixe
 des VM. Le couple `<org>/<env>` donne aussi le chemin des secrets applicatifs
 dans Vault : `kubernetes-cluster/<org>/<env>/` (voir
 [terraform/vault/k8s-secrets.tf](../../vault/k8s-secrets.tf) et

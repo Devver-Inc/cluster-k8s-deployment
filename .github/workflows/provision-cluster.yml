@@ -66,7 +66,7 @@ name: "Provision cluster"
 #      detect au push précédent — vérifiable : policy terraform-<org>-ro
 #      listée par terraform/scripts/list-vault-orgs.sh).
 #   3. Les VRAIS secrets (vm_password, ssh_private_key, ssh_public_key) ont
-#      été saisis à la main dans devver-infra-deployment/<org> — jamais les
+#      été saisis à la main dans devver-infra-deployment/<org>/<env> — jamais les
 #      placeholders CHANGE_ME du template.
 # Toujours uniquement create-cluster par ce chemin, jamais delete/add/remove.
 on:
@@ -214,7 +214,7 @@ jobs:
                 # ne se déclenche QUE via workflow_dispatch (voir plus haut),
                 # une fois les vrais secrets saisis à la main dans Vault —
                 # jamais sur un simple push, même si le dossier existe déjà.
-                echo "::warning::detect: '${org}' prête pour create-cluster, mais ignorée sur push — saisir les vrais secrets dans devver-infra-deployment/${org}, puis lancer workflow_dispatch (Actions > Provision cluster > Run workflow, input org=${org})." >&2
+                echo "::warning::detect: '${org}' prête pour create-cluster, mais ignorée sur push — saisir les vrais secrets dans devver-infra-deployment/$(echo "${org}" | sed -E 's#^(.+)-(prod|staging|dev)$#\1/\2#'), puis lancer workflow_dispatch (Actions > Provision cluster > Run workflow, input org=${org})." >&2
                 ;;
               add-worker)
                 orgs_add_worker=$(echo "${orgs_add_worker}" | jq -c --arg org "${org}" '. + [$org]')

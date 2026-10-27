@@ -32,7 +32,7 @@
   vars:
     rke2_kubectl: /var/lib/rancher/rke2/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml
     vault_k8s_kv_mount: kubernetes-cluster
-    vault_k8s_id_regex: '^([a-z0-9][a-z0-9-]*)-(prod|staging|dev)$'
+    vault_k8s_id_regex: "{{ cluster_id_regex }}"   # group_vars/all.yml
     vault_k8s_org: "{{ cluster_org | regex_replace(vault_k8s_id_regex, '\\1') }}"
     vault_k8s_env: "{{ cluster_org | regex_replace(vault_k8s_id_regex, '\\2') }}"
     vault_k8s_prefix: "{{ vault_k8s_org }}/{{ vault_k8s_env }}"

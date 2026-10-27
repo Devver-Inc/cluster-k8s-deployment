@@ -4,7 +4,9 @@
 # - devver-infra-deployment/ansible            : réservé, pas encore utilisé par ce Terraform
 # - devver-infra-deployment/vm_secret_template : vm_user + ssh_public_key + vm_password/ssh_private_key
 #                                                 (placeholders) "template", cloné vers <org> une seule fois
-# - devver-infra-deployment/<org>              : copie du template pour cette org — créée une seule fois par ce
+# - devver-infra-deployment/<org>/<env>        : copie du template pour ce cluster (<org>/<env> pour un cluster
+#                                                 <org>-<env>, même découpage que kubernetes-cluster/<org>/<env> ;
+#                                                 <id> à plat pour les anciens identifiants sans env) — créée une seule fois par ce
 #                                                 Terraform (lifecycle ignore_changes). Les placeholders vm_password
 #                                                 et ssh_private_key du template atterrissent dans le state à cette
 #                                                 création, mais toute valeur remplacée ensuite à la main dans l'UI
@@ -42,7 +44,7 @@ resource "vault_approle_auth_backend_role" "backblaze" {
   token_max_ttl  = 900
 }
 
-# Clone devver-infra-deployment/vm_secret_template vers devver-infra-deployment/<org>,
+# Clone devver-infra-deployment/vm_secret_template vers devver-infra-deployment/<org>/<env>,
 # une seule fois à la création de l'org. lifecycle.ignore_changes garantit qu'aucun
 # apply ultérieur (même pour d'autres orgs) ne réécrase ce secret — les vraies valeurs
 # de vm_password/ssh_private_key que tu écris ensuite à la main dans l'UI Vault (à la
@@ -54,11 +56,21 @@ data "vault_kv_secret_v2" "vm_secret_template" {
   name  = "vm_secret_template"
 }
 
+# Chemin infra de chaque cluster : <org>/<env> pour un identifiant <org>-<env>
+# (local.cluster_id_regex, k8s-secrets.tf), l'identifiant à plat sinon.
+locals {
+  infra_path = {
+    for id in var.orgs : id => (
+      can(regex(local.cluster_id_regex, id)) ? join("/", regex(local.cluster_id_regex, id)) : id
+    )
+  }
+}
+
 resource "vault_kv_secret_v2" "org_secret" {
   for_each = toset(var.orgs)
 
   mount = vault_mount.devver_infra_deployment.path
-  name  = each.key
+  name  = local.infra_path[each.key]
 
   data_json = jsonencode({
     vm_user         = data.vault_kv_secret_v2.vm_secret_template.data["vm_user"]
@@ -72,7 +84,7 @@ resource "vault_kv_secret_v2" "org_secret" {
   }
 }
 
-# Policy read-only par org, limitée à devver-infra-deployment/proxmox + devver-infra-deployment/<org>.
+# Policy read-only par org, limitée à devver-infra-deployment/proxmox + son chemin (local.infra_path).
 # auth/token/create est nécessaire même en lecture seule : le provider Vault de
 # Terraform crée un child token limité à partir du token AppRole obtenu au login.
 resource "vault_policy" "org_ro" {
@@ -89,11 +101,11 @@ resource "vault_policy" "org_ro" {
       capabilities = ["list", "read"]
     }
 
-    path "devver-infra-deployment/data/${each.key}" {
+    path "devver-infra-deployment/data/${local.infra_path[each.key]}" {
       capabilities = ["read"]
     }
 
-    path "devver-infra-deployment/metadata/${each.key}" {
+    path "devver-infra-deployment/metadata/${local.infra_path[each.key]}" {
       capabilities = ["list", "read"]
     }
 
@@ -178,7 +190,7 @@ resource "vault_policy" "ci" {
     }
 
     # create/update nécessaires : vault_kv_secret_v2.org_secret clone
-    # vm_secret_template vers devver-infra-deployment/<org> à la création
+    # vm_secret_template vers devver-infra-deployment/<org>/<env> à la création
     # d'une org (PUT). delete nécessaire pour vault-cleanup (suppression
     # d'une org retirée du for_each). read pour vm_secret_template lui-même
     # et pour les data sources des roles terraform-<org> (auth/token/create

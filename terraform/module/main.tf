@@ -74,6 +74,17 @@ resource "proxmox_virtual_environment_vm" "mixed" {
 
   on_boot = true
   started = true
+
+  # Dérive permanente sinon (constatée sur test-dev : chaque run de la CI
+  # modifiait, donc redémarrait, toutes les VMs) :
+  # - tags : Proxmox les renvoie triés et en minuscules ("K8s" -> "k8s").
+  # - user_account : clé/mot de passe ne servent qu'au 1er boot (cloud-init) ;
+  #   une valeur relue différemment (ex: saut de ligne final de la clé
+  #   publique) ou changée ensuite dans Vault ne doit pas toucher une VM
+  #   existante. Pour appliquer une nouvelle clé : recréer la VM.
+  lifecycle {
+    ignore_changes = [tags, initialization[0].user_account]
+  }
 }
 
 resource "proxmox_virtual_environment_vm" "worker_only" {
@@ -150,4 +161,15 @@ resource "proxmox_virtual_environment_vm" "worker_only" {
 
   on_boot = true
   started = true
+
+  # Dérive permanente sinon (constatée sur test-dev : chaque run de la CI
+  # modifiait, donc redémarrait, toutes les VMs) :
+  # - tags : Proxmox les renvoie triés et en minuscules ("K8s" -> "k8s").
+  # - user_account : clé/mot de passe ne servent qu'au 1er boot (cloud-init) ;
+  #   une valeur relue différemment (ex: saut de ligne final de la clé
+  #   publique) ou changée ensuite dans Vault ne doit pas toucher une VM
+  #   existante. Pour appliquer une nouvelle clé : recréer la VM.
+  lifecycle {
+    ignore_changes = [tags, initialization[0].user_account]
+  }
 }

@@ -10,10 +10,14 @@ vault_auth_mount_point: terraform-orgs
 vault_role_id: "{{ lookup('env', 'VAULT_ROLE_ID') }}"
 vault_secret_id: "{{ lookup('env', 'VAULT_SECRET_ID') }}"
 
-# cluster_org DOIT être fourni au lancement (-e cluster_org=<org>) — détermine
-# le chemin Vault devver-infra-deployment/<org> et le nom de l'inventaire.
+# cluster_org DOIT être fourni au lancement (-e cluster_org=<org>-<env>) —
+# identifiant du cluster (nom de l'inventaire). Chemin Vault :
+# devver-infra-deployment/<org>/<env> pour un cluster <org>-<env> (même
+# découpage que kubernetes-cluster/<org>/<env>), <id> à plat pour les anciens
+# clusters sans env (regex_replace sans correspondance = chaîne inchangée).
+cluster_id_regex: '^([a-z0-9][a-z0-9-]*)-(prod|staging|dev)$'
 vault_kv_mount: devver-infra-deployment
-vault_cluster_secret_path: "{{ cluster_org }}"
+vault_cluster_secret_path: "{{ cluster_org | regex_replace(cluster_id_regex, '\\1/\\2') }}"
 
 # Version RKE2 installée par 02-dependencies.yml (script officiel get.rke2.io).
 rke2_version: "v1.30.5+rke2r1"

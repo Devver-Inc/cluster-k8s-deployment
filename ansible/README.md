@@ -24,7 +24,7 @@ ces prérequis sont fournis par l'image `runner-images/ansible/` — voir
   `../terraform/clusters/<org>/ansible-inventory/inventory-<org>.ini`
   (committé — ne contient que IP/hostname/user, jamais de secret).
 - **Secrets** (`ssh_private_key`, `vm_password`, et en sortie `kubeconfig`,
-  `rke2_token`) : lus/écrits dans Vault (`devver-infra-deployment/<org>`) via
+  `rke2_token`) : lus/écrits dans Vault (`devver-infra-deployment/<org>/<env>`) via
   le plugin `community.hashi_vault`, avec le même AppRole `terraform-ci` que
   Terraform. Fournir avant chaque run :
 

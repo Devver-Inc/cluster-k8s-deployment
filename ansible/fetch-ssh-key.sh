@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Récupère ssh_private_key depuis Vault (devver-infra-deployment/<org>) et
+# Récupère ssh_private_key depuis Vault (devver-infra-deployment/<org>/<env>) et
 # l'écrit dans un fichier temporaire local, référencé par
 # ansible_ssh_private_key_file (group_vars/all.yml) — nécessaire car Ansible
 # résout ce champ AVANT sa première connexion SSH, donc aucune tâche d'un
@@ -45,6 +45,13 @@ if [[ -z "${VAULT_TOKEN:-}" ]]; then
   fi
   export VAULT_TOKEN
 fi
+# Chemin Vault : <org>/<env> pour un cluster <org>-<env> (même découpage que
+# kubernetes-cluster/<org>/<env>), identifiant à plat pour les anciens clusters.
+if [[ "${org}" =~ ^([a-z0-9][a-z0-9-]*)-(prod|staging|dev)$ ]]; then
+  vault_path="${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
+else
+  vault_path="${org}"
+fi
 
 # -format=json + jq -r plutôt que `vault kv get -field=` : plus robuste
 # face au rendu texte du CLI sur une valeur multi-ligne (comportement non
@@ -53,9 +60,9 @@ fi
 # /etc/passwd, approche depuis abandonnée, voir runner-images/ansible/
 # Dockerfile) : ce flag n'a jamais aplati de clé, mais -format=json+jq
 # reste une amélioration de robustesse légitime, donc conservé.
-fetched_key=$(vault kv get -format=json "devver-infra-deployment/${org}" | jq -r '.data.data.ssh_private_key')
+fetched_key=$(vault kv get -format=json "devver-infra-deployment/${vault_path}" | jq -r '.data.data.ssh_private_key')
 if [[ -z "${fetched_key}" || "${fetched_key}" == "null" ]]; then
-  echo "fetch-ssh-key.sh: échec de lecture de ssh_private_key sur devver-infra-deployment/${org}." >&2
+  echo "fetch-ssh-key.sh: échec de lecture de ssh_private_key sur devver-infra-deployment/${vault_path}." >&2
   return 1 2>/dev/null || true
 fi
 
