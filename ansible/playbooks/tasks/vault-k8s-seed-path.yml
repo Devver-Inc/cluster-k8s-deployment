@@ -1,11 +1,13 @@
 ---
 # Initialise UN chemin kubernetes-cluster/<org>/<env>/<seed.path> :
-# lit l'existant, calcule les valeurs des clés ABSENTES (generate / static /
-# manual), écrit le tout fusionné — l'existant gagne toujours.
-# Inclus en boucle par 05-vault-k8s.yml (loop_var: seed).
+# lit l'existant, calcule la valeur des clés ABSENTES selon leur classe
+# (generate / static / shared / manual-pre / manual-post / auto-post, voir
+# vars/vault-k8s-secrets.yml), écrit le tout fusionné — l'existant gagne,
+# sauf une clé "shared" encore à CHANGEME, recopiée dès que la valeur commune
+# existe dans devver-infra-deployment/shared/<seed.path>.
+# Inclus en boucle par 05-vault-seed.yml (loop_var: seed).
 
 - name: "{{ seed.path }} — lire l'existant"
-  delegate_to: localhost
   community.hashi_vault.vault_kv2_get:
     url: "{{ vault_addr }}"
     auth_method: "{{ vault_auth_method }}"
@@ -15,7 +17,7 @@
     engine_mount_point: "{{ vault_k8s_kv_mount }}"
     path: "{{ vault_k8s_prefix }}/{{ seed.path }}"
   register: _seed_existing
-  # 404 attendu au premier run (chemin pas encore créé)
+  # Chemin absent attendu au premier run
   failed_when: false
   no_log: true
 
@@ -28,34 +30,57 @@
     - _seed_existing.secret is not defined
     - "'Invalid or missing path' not in (_seed_existing.msg | default(''))"
 
+- name: "{{ seed.path }} — lire la valeur commune (shared/{{ seed.path }})"
+  community.hashi_vault.vault_kv2_get:
+    url: "{{ vault_addr }}"
+    auth_method: "{{ vault_auth_method }}"
+    mount_point: "{{ vault_auth_mount_point }}"
+    role_id: "{{ vault_role_id }}"
+    secret_id: "{{ vault_secret_id }}"
+    engine_mount_point: "{{ vault_kv_mount }}"
+    path: "shared/{{ seed.path }}"
+  register: _seed_shared
+  when: seed.fields | selectattr('mode', 'equalto', 'shared') | list | length > 0
+  failed_when: false
+  no_log: true
+
 - name: "{{ seed.path }} — repartir d'un état vide"
   ansible.builtin.set_fact:
     _seed_current: "{{ _seed_existing.secret | default({}) }}"
+    _seed_shared_values: "{{ _seed_shared.secret | default({}) if (_seed_shared is not skipped) else {} }}"
     _seed_defaults: {}
   no_log: true
 
 # Inline if Jinja : seule la branche retenue est évaluée — le lookup password
-# n'est appelé que pour les clés en mode generate.
-- name: "{{ seed.path }} — valeurs initiales des clés absentes"
+# n'est appelé que pour les clés en mode generate. Une valeur commune vide ou
+# à CHANGEME n'est pas copiée (reste CHANGEME, donc bloquante).
+- name: "{{ seed.path }} — valeurs des clés absentes"
   ansible.builtin.set_fact:
     _seed_defaults: >-
       {{ _seed_defaults | combine({
            field.name:
              field.value if field.mode == 'static'
-             else 'CHANGEME' if field.mode == 'manual'
+             else (_seed_shared_values[field.name]
+                   if (_seed_shared_values[field.name] | default('') | trim | length > 0
+                       and _seed_shared_values[field.name] | trim | upper != 'CHANGEME')
+                   else 'CHANGEME') if field.mode == 'shared'
              else lookup('ansible.builtin.password', '/dev/null',
                          length=field.length | default(40),
-                         chars=field.chars | default(['ascii_letters', 'digits']))
+                         chars=field.chars | default(['ascii_letters', 'digits'])) if field.mode == 'generate'
+             else 'CHANGEME'
          }) }}
   loop: "{{ seed.fields }}"
   loop_control:
     loop_var: field
     label: "{{ field.name }} ({{ field.mode }})"
-  when: field.name not in _seed_current
+  when: >-
+    field.name not in _seed_current
+    or (field.mode == 'shared' and _seed_current[field.name] == 'CHANGEME')
   no_log: true
 
-- name: "{{ seed.path }} — écrire (uniquement si des clés manquaient)"
-  delegate_to: localhost
+# _seed_current | combine(_seed_defaults) : _seed_defaults ne contient que les
+# clés absentes ou les "shared" à CHANGEME — l'existant n'est jamais écrasé.
+- name: "{{ seed.path }} — écrire (uniquement si une clé a changé)"
   community.hashi_vault.vault_kv2_write:
     url: "{{ vault_addr }}"
     auth_method: "{{ vault_auth_method }}"
@@ -64,13 +89,20 @@
     secret_id: "{{ vault_secret_id }}"
     engine_mount_point: "{{ vault_k8s_kv_mount }}"
     path: "{{ vault_k8s_prefix }}/{{ seed.path }}"
-    data: "{{ _seed_defaults | combine(_seed_current) }}"
-  when: _seed_defaults | length > 0
+    data: "{{ _seed_current | combine(_seed_defaults) }}"
+  when: (_seed_current | combine(_seed_defaults)) != _seed_current
   no_log: true
 
-- name: "{{ seed.path }} — noter les clés encore à CHANGEME"
+- name: "{{ seed.path }} — classer les clés encore à CHANGEME"
+  vars:
+    _final: "{{ _seed_current | combine(_seed_defaults) }}"
+    _todo: >-
+      {{ seed.fields | selectattr('name', 'in', _final | dict2items
+         | selectattr('value', 'equalto', 'CHANGEME') | map(attribute='key') | list) | list }}
   ansible.builtin.set_fact:
-    vault_k8s_todo: >-
-      {{ vault_k8s_todo + ((_seed_defaults | combine(_seed_current)) | dict2items
-         | selectattr('value', 'equalto', 'CHANGEME') | map(attribute='key')
-         | map('regex_replace', '^', seed.path + '/') | list) }}
+    vault_k8s_blocking: >-
+      {{ vault_k8s_blocking + (_todo | selectattr('mode', 'in', ['shared', 'manual-pre'])
+         | map(attribute='name') | map('regex_replace', '^', seed.path + '/') | list) }}
+    vault_k8s_later: >-
+      {{ vault_k8s_later + (_todo | selectattr('mode', 'in', ['manual-post', 'auto-post'])
+         | map(attribute='name') | map('regex_replace', '^', seed.path + '/') | list) }}

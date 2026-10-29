@@ -19,3 +19,6 @@ agent
 # IP de l'ingress (Traefik, Service LoadBalancer annoncé par MetalLB) —
 # utilisée par ansible/playbooks/03-cluster-init.yml.
 metallb_ip=${metallb_ip}
+%{ for k, v in cluster_vars ~}
+${k}=${v}
+%{ endfor ~}

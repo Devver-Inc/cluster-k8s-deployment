@@ -6,6 +6,7 @@ resource "local_file" "ansible_inventory" {
     mixed_nodes       = local.mixed_nodes
     worker_only_nodes = local.worker_only_nodes
     metallb_ip        = local.metallb_ip
+    cluster_vars      = var.cluster_vars
   })
 }
 

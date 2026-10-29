@@ -137,3 +137,9 @@ variable "vm_password" {
   type        = string
   sensitive   = true
 }
+
+variable "cluster_vars" {
+  description = "Variables supplémentaires du cluster, écrites telles quelles dans [k8s_cluster:vars] de l'inventaire Ansible (domaine, partage NFS, révision git du repo kubernetes… — voir clusters/_template/providers.tf)"
+  type        = map(string)
+  default     = {}
+}

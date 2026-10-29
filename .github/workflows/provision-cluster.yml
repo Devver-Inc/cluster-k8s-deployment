@@ -172,28 +172,8 @@ jobs:
             org="${{ inputs.org }}"
             org_json="$(jq -cn --arg org "${org}" '[$org]')"
 
-            # Garde-fou : la structure Vault vient d'être créée (step
-            # précédent) avec les valeurs VIDES de vm_secret_template. Créer
-            # les VMs maintenant les ferait démarrer sans clé SSH ni mot de
-            # passe — irréparable ensuite (ignore_changes sur user_account).
-            # Tant que les secrets VM ne sont pas saisis : on s'arrête là.
-            if [[ "${org}" =~ ^([a-z0-9][a-z0-9-]*)-(prod|staging|dev)$ ]]; then
-              infra_path="${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
-            else
-              infra_path="${org}"
-            fi
-            missing="$(vault kv get -format=json "devver-infra-deployment/${infra_path}" \
-              | jq -r '.data.data as $d | ["vm_user","vm_password","ssh_public_key","ssh_private_key"]
-                       | map(select(($d[.] // "") | (length == 0 or test("CHANGE_?ME"; "i"))))
-                       | join(", ")')"
-            if [[ -n "${missing}" ]]; then
-              echo "::warning::detect: structure Vault prête pour '${org}', mais secrets VM non saisis (${missing}) dans devver-infra-deployment/${infra_path}. Les saisir, puis relancer ce workflow (workflow_dispatch, org=${org}). Aucune VM créée."
-              for k in orgs_create orgs_delete orgs_add_worker orgs_remove_worker orgs_configure; do
-                echo "${k}=[]" >> "$GITHUB_OUTPUT"
-              done
-              exit 0
-            fi
-
+            # Les secrets (VM + applicatifs) sont vérifiés par le job
+            # prepare-secrets : create-cluster ne part que s'ils sont prêts.
             echo "orgs_create=${org_json}" >> "$GITHUB_OUTPUT"
             echo "orgs_delete=[]" >> "$GITHUB_OUTPUT"
             echo "orgs_add_worker=[]" >> "$GITHUB_OUTPUT"
@@ -262,11 +242,85 @@ jobs:
             echo "orgs_configure=${orgs_configure}"
           } >> "$GITHUB_OUTPUT"
 
+
+  # --- Préparation des secrets (avant toute VM) ------------------------------
+  # 1er lancement : la structure Vault vient d'être créée par detect ; ce job
+  # initialise les secrets applicatifs (générés, copies des secrets communs de
+  # devver-infra-deployment/shared/, CHANGEME) et vérifie les secrets VM. Tant
+  # qu'il manque un secret VM ou un secret bloquant : ready=false, aucune VM
+  # n'est créée (sinon elles démarreraient sans clé SSH — irréparable avec
+  # ignore_changes). Après saisie, le même workflow_dispatch reprend.
+  # Matrix sur orgs_create : en pratique 1 seule org (workflow_dispatch) — la
+  # sortie ready est celle de cette org.
+
+  prepare-secrets:
+    needs: [detect, check-ansible-image]
+    if: needs.detect.outputs.orgs_create != '[]'
+    runs-on: self-hosted
+    container:
+      image: ${{ needs.check-ansible-image.outputs.image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    strategy:
+      fail-fast: false
+      matrix:
+        org: ${{ fromJson(needs.detect.outputs.orgs_create || '[]') }}
+    outputs:
+      ready: ${{ steps.status.outputs.ready }}
+    steps:
+      - name: Trust the shared self-hosted workspace (git safe.directory)
+        shell: bash
+        run: git config --global --add safe.directory '*'
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Initialiser et vérifier les secrets (05-vault-seed.yml)
+        working-directory: ansible
+        shell: bash
+        env:
+          VAULT_ROLE_ID: ${{ secrets.VAULT_CI_ROLE_ID }}
+          VAULT_SECRET_ID: ${{ secrets.VAULT_CI_SECRET_ID }}
+        # $RUNNER_TEMP (et non ${{ runner.temp }}, chemin côté hôte) : job en conteneur.
+        run: |
+          set -euo pipefail
+          export PREPARE_STATUS_FILE="${RUNNER_TEMP}/prepare-status.json"
+          ansible-playbook -i localhost, -c local -e ansible_user=root \
+            -e cluster_org="${{ matrix.org }}" playbooks/05-vault-seed.yml
+
+      - name: Statut
+        id: status
+        shell: bash
+        run: |
+          set -euo pipefail
+          PREPARE_STATUS_FILE="${RUNNER_TEMP}/prepare-status.json"
+          ready="$(jq -r '.ready' "$PREPARE_STATUS_FILE")"
+          echo "ready=${ready}" >> "$GITHUB_OUTPUT"
+          if [[ "${ready}" != "true" ]]; then
+            vm="$(jq -r '.vm_missing | join(", ")' "$PREPARE_STATUS_FILE")"
+            bl="$(jq -r '.blocking | join(", ")' "$PREPARE_STATUS_FILE")"
+            echo "::warning::Cluster '${{ matrix.org }}' : secrets à saisir avant déploiement — VM : [${vm}] ; applicatifs/communs : [${bl}]. Aucune VM créée. Saisir puis relancer ce workflow (workflow_dispatch, org=${{ matrix.org }})."
+          fi
+          later="$(jq -r '.later | join(", ")' "$PREPARE_STATUS_FILE")"
+          [[ -z "${later}" ]] || echo "::notice::Après installation (non bloquant) : ${later}"
+
+  prepare-secrets-cleanup-workspace:
+    needs: [detect, prepare-secrets]
+    if: always() && needs.detect.outputs.orgs_create != '[]'
+    runs-on: self-hosted
+    steps:
+      - name: Reclaim workspace ownership for the runner user
+        run: sudo chown -R "$(id -u):$(id -g)" "${GITHUB_WORKSPACE}"
+
   # --- Création cluster --------------------------------------------------
 
   create-cluster:
-    needs: detect
-    if: needs.detect.outputs.orgs_create != '[]'
+    needs: [detect, prepare-secrets]
+    # ready est calculé par prepare-secrets (secrets VM + secrets applicatifs
+    # bloquants saisis) : sinon le run s'arrête ici, en vert, avec un warning.
+    if: needs.detect.outputs.orgs_create != '[]' && needs.prepare-secrets.outputs.ready == 'true'
     runs-on: self-hosted
     strategy:
       fail-fast: false
@@ -425,7 +479,7 @@ jobs:
   # --- Configuration Ansible (après create-cluster ou add-worker) --------
 
   configure:
-    needs: [detect, create-cluster, add-worker, check-ansible-image]
+    needs: [detect, prepare-secrets, create-cluster, add-worker, check-ansible-image]
     # Se déclenche dès que l'un des deux jobs Terraform amont a réussi, sans
     # être bloqué si l'autre a été skip (pas concerné ce run) — seul un
     # ÉCHEC explicite de l'un des deux empêche Ansible de tourner.
@@ -433,6 +487,7 @@ jobs:
       always() &&
       needs.create-cluster.result != 'failure' && needs.add-worker.result != 'failure' &&
       needs.check-ansible-image.result == 'success' &&
+      needs.prepare-secrets.result != 'failure' && needs.prepare-secrets.outputs.ready != 'false' &&
       needs.detect.outputs.orgs_configure != '[]'
     runs-on: self-hosted
     container:

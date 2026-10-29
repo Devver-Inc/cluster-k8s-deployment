@@ -25,6 +25,38 @@ variable "env" {
   }
 }
 
+variable "base_domain" {
+  description = "Domaine de base : le cluster est servi sous <org>-<env>.<base_domain> (ex: acme-prod.devver.app)"
+  type        = string
+  default     = "devver.app"
+}
+
+variable "nfs_server" {
+  description = "Serveur NFS (NAS) du stockage persistant du cluster"
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9]{1,3}(\\.[0-9]{1,3}){3}$", var.nfs_server)) || can(regex("^[a-z0-9.-]+$", var.nfs_server))
+    error_message = "nfs_server doit être une IP ou un nom d'hôte."
+  }
+}
+
+variable "nfs_share" {
+  description = "Partage NFS DÉDIÉ à ce cluster (isolation : accès réservé aux IP de ses noeuds), à créer sur le NAS avant le déploiement — ex: /volume1/NFS_K8S_<ORG>_<ENV>"
+  type        = string
+
+  validation {
+    condition     = startswith(var.nfs_share, "/") && var.nfs_share != "/volume1/NFS_K8S_DEVVER_PROD" && !strcontains(var.nfs_share, "REPLACE_ME")
+    error_message = "nfs_share doit être un chemin absolu, propre à ce cluster (jamais le partage de la prod)."
+  }
+}
+
+variable "kubernetes_git_revision" {
+  description = "Révision (branche ou tag) du repo Devver-Inc/kubernetes que suit ArgoCD sur ce cluster"
+  type        = string
+  default     = "main"
+}
+
 variable "org_subnet_index" {
   description = "Registre centralisé { <org>-<env> => subnet_index }, injecté via le symlink ip-plan.auto.tfvars"
   type        = map(number)

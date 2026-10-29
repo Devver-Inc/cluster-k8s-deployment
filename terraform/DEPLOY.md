@@ -310,12 +310,17 @@ pour redéclencher `create-cluster` une fois les secrets prêts. Deux options
 pour relancer :
 - Pousser un commit (même trivial) touchant `terraform/clusters/<org>/`.
 > **Création d'un cluster entièrement par la pipeline (2 lancements)** :
+> 0. prérequis : le partage NFS du cluster existe sur le NAS (`nfs_share`,
+>    accès réservé aux IP du cluster) ; les secrets communs sont saisis une
+>    fois pour toutes dans `devver-infra-deployment/shared/` (`ghcr`,
+>    `github`, `cloudflare`, `argocd-repos`) ;
 > 1. pousser `terraform/clusters/<org>-<env>/` sur la branche, puis
->    `workflow_dispatch` (input `org=<org>-<env>`) : le job `detect` crée la
->    structure Vault, constate que les secrets VM sont vides et **s'arrête**
->    (warning, aucune VM créée) ;
+>    `workflow_dispatch` (input `org=<org>-<env>`) : `detect` crée la
+>    structure Vault, `prepare-secrets` initialise tous les secrets du
+>    cluster (générés, copies des communs) puis **s'arrête** (warning listant
+>    ce qui manque, aucune VM créée) ;
 > 2. saisir `vm_password`, `ssh_public_key`, `ssh_private_key` dans
->    `devver-infra-deployment/<org>/<env>` ;
+>    `devver-infra-deployment/<org>/<env>` (et tout autre secret signalé) ;
 > 3. relancer le même `workflow_dispatch` : création des VMs puis `configure`.
 >
 > Ce garde-fou est indispensable : avec `ignore_changes` sur le compte

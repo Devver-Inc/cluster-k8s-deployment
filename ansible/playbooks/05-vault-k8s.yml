@@ -1,9 +1,10 @@
 ---
-# Branche le cluster sur Vault pour les secrets applicatifs (External Secrets
-# Operator) et initialise kubernetes-cluster/<org>/<env>/. À lancer après
-# 03-cluster-init.yml, uniquement pour un cluster nommé <org>-<prod|staging|dev>
-# (la structure Vault correspondante — mount, auth k8s-<org>-<env>, policies,
-# roles — est créée par terraform/vault/k8s-secrets.tf).
+# Branche le cluster sur Vault (auth Kubernetes k8s-<org>-<env>) pour External
+# Secrets Operator et le backend. À lancer après 03-cluster-init.yml,
+# uniquement pour un cluster nommé <org>-<prod|staging|dev> (la structure
+# Vault — mount, auth, policies, roles — est créée par
+# terraform/vault/k8s-secrets.tf ; les VALEURS des secrets sont initialisées
+# avant la création du cluster par 05-vault-seed.yml).
 #
 # 1. Crée dans le cluster le ServiceAccount kube-system/vault-auth (token
 #    longue durée + ClusterRoleBinding system:auth-delegator) : c'est le
@@ -11,33 +12,21 @@
 #    ESO (TokenReview). Rien d'autre côté cluster : ESO, ses ServiceAccounts
 #    et les SecretStores sont déployés par ArgoCD (Devver-Inc/kubernetes).
 # 2. Écrit auth/k8s-<org>-<env>/config (URL API + CA RKE2 + JWT reviewer).
-# 3. Initialise chaque chemin du catalogue vars/vault-k8s-secrets.yml :
-#    valeurs générées ou CHANGEME pour les clés ABSENTES uniquement — un
-#    nouveau run ne réécrit jamais une valeur existante (idempotent).
-# 4. Liste les clés restant à saisir dans la console Vault.
 #
 # Usage :
 #   ansible-playbook -i ../terraform/clusters/<org>-<env>/ansible-inventory/inventory-<org>-<env>.ini \
 #     -e cluster_org=<org>-<env> playbooks/05-vault-k8s.yml
 
-- name: Brancher le cluster sur Vault (auth Kubernetes + secrets applicatifs)
+- name: Brancher le cluster sur Vault (auth Kubernetes)
   hosts: server[0]
   gather_facts: false
   # become requis pour lire le kubeconfig / CA RKE2 (0600, root).
   become: true
 
-  vars_files:
-    - ../vars/vault-k8s-secrets.yml
-
   vars:
     rke2_kubectl: /var/lib/rancher/rke2/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml
-    vault_k8s_kv_mount: kubernetes-cluster
     vault_k8s_id_regex: "{{ cluster_id_regex }}"   # group_vars/all.yml
-    vault_k8s_org: "{{ cluster_org | regex_replace(vault_k8s_id_regex, '\\1') }}"
-    vault_k8s_env: "{{ cluster_org | regex_replace(vault_k8s_id_regex, '\\2') }}"
-    vault_k8s_prefix: "{{ vault_k8s_org }}/{{ vault_k8s_env }}"
     vault_k8s_auth_mount: "k8s-{{ cluster_org }}"
-    vault_k8s_todo: []
 
   tasks:
     - name: Vérifier le format de l'identifiant de cluster
@@ -119,23 +108,3 @@
           # Vault est hors cluster : ne pas chercher de JWT/CA locaux.
           disable_local_ca_jwt: true
       no_log: true
-
-    # --- 3. Initialisation des secrets ----------------------------------------
-
-    - name: Initialiser chaque chemin du catalogue
-      ansible.builtin.include_tasks: tasks/vault-k8s-seed-path.yml
-      loop: "{{ vault_k8s_secrets }}"
-      loop_control:
-        loop_var: seed
-        label: "{{ vault_k8s_kv_mount }}/{{ vault_k8s_prefix }}/{{ seed.path }}"
-
-    # --- 4. Récapitulatif -------------------------------------------------------
-
-    - name: Secrets à compléter dans la console Vault
-      ansible.builtin.debug:
-        msg: >-
-          {{ ('Cluster ' ~ cluster_org ~ ' branché sur Vault (auth/' ~ vault_k8s_auth_mount ~ '). '
-              ~ 'Clés à saisir dans ' ~ vault_addr ~ '/ui sous ' ~ vault_k8s_kv_mount ~ '/' ~ vault_k8s_prefix ~ '/ : '
-              ~ (vault_k8s_todo | join(', ')))
-             if vault_k8s_todo | length > 0
-             else ('Cluster ' ~ cluster_org ~ ' branché sur Vault — aucun secret à CHANGEME.') }}

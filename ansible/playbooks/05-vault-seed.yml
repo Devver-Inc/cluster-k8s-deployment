@@ -1,0 +1,102 @@
+---
+# Prépare les secrets d'un cluster AVANT sa création (job prepare-secrets de
+# provision-cluster.yml, 1er comme 2e lancement) — tourne en local, sans
+# cluster ni SSH :
+#
+# 1. Vérifie les secrets VM (devver-infra-deployment/<org>/<env> : vm_user,
+#    vm_password, ssh_public_key, ssh_private_key) : vides / CHANGE_ME =
+#    déploiement bloqué.
+# 2. Clusters <org>-<prod|staging|dev> : initialise kubernetes-cluster/<org>/<env>/*
+#    d'après vars/vault-k8s-secrets.yml (valeurs générées, fixes, copies des
+#    secrets communs de devver-infra-deployment/shared/, CHANGEME sinon).
+#    Jamais de réécriture d'une valeur existante (idempotent).
+# 3. Écrit un statut JSON dans $PREPARE_STATUS_FILE :
+#    {"ready": bool, "vm_missing": [...], "blocking": [...], "later": [...]}
+#    ready = aucun secret VM manquant ET aucun secret shared/manual-pre à
+#    CHANGEME. Les secrets manual-post / auto-post ("later") ne bloquent pas.
+#
+# Ne fait jamais échouer le run sur un secret manquant : c'est le workflow
+# qui lit le statut et s'arrête proprement (warning) avant de créer les VMs.
+#
+# Usage (le contrôleur suffit, pas d'inventaire de cluster) :
+#   VAULT_ROLE_ID=... VAULT_SECRET_ID=... PREPARE_STATUS_FILE=/tmp/status.json \
+#   ansible-playbook -i localhost, -c local -e cluster_org=<org>-<env> \
+#     -e ansible_user=root playbooks/05-vault-seed.yml
+
+- name: Préparer les secrets du cluster dans Vault
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    # vault_addr, auth AppRole, cluster_id_regex, vault_cluster_secret_path…
+    # (ansible_user y est dérivé d'un lookup Vault : le surcharger en -e).
+    - ../group_vars/all.yml
+    - ../vars/vault-k8s-secrets.yml
+
+  vars:
+    vault_k8s_kv_mount: kubernetes-cluster
+    vault_k8s_org: "{{ cluster_org | regex_replace(cluster_id_regex, '\\1') }}"
+    vault_k8s_env: "{{ cluster_org | regex_replace(cluster_id_regex, '\\2') }}"
+    vault_k8s_prefix: "{{ vault_k8s_org }}/{{ vault_k8s_env }}"
+    vault_k8s_blocking: []
+    vault_k8s_later: []
+    prepare_status_file: "{{ lookup('env', 'PREPARE_STATUS_FILE') | default('/tmp/prepare-status.json', true) }}"
+    vm_fields: [vm_user, vm_password, ssh_public_key, ssh_private_key]
+
+  tasks:
+    # --- 1. Secrets VM ----------------------------------------------------------
+
+    - name: "Lire devver-infra-deployment/{{ vault_cluster_secret_path }}"
+      community.hashi_vault.vault_kv2_get:
+        url: "{{ vault_addr }}"
+        auth_method: "{{ vault_auth_method }}"
+        mount_point: "{{ vault_auth_mount_point }}"
+        role_id: "{{ vault_role_id }}"
+        secret_id: "{{ vault_secret_id }}"
+        engine_mount_point: "{{ vault_kv_mount }}"
+        path: "{{ vault_cluster_secret_path }}"
+      register: _vm_secret
+      failed_when: false
+      no_log: true
+
+    - name: Secrets VM manquants
+      ansible.builtin.set_fact:
+        vm_missing: >-
+          {{ vm_fields | reject('in', (_vm_secret.secret | default({})) | dict2items
+             | selectattr('value', 'string')
+             | rejectattr('value', 'match', '^\s*$')
+             | rejectattr('value', 'match', '(?i)^\s*change_?me\s*$')
+             | map(attribute='key') | list) | list }}
+
+    # --- 2. Secrets applicatifs (clusters <org>-<env> uniquement) ---------------
+
+    - name: Initialiser chaque chemin du catalogue
+      ansible.builtin.include_tasks: tasks/vault-k8s-seed-path.yml
+      loop: "{{ vault_k8s_secrets }}"
+      loop_control:
+        loop_var: seed
+        label: "{{ vault_k8s_kv_mount }}/{{ vault_k8s_prefix }}/{{ seed.path }}"
+      when: cluster_org is regex(cluster_id_regex)
+
+    # --- 3. Statut ---------------------------------------------------------------
+
+    - name: Écrire le statut pour le workflow
+      ansible.builtin.copy:
+        dest: "{{ prepare_status_file }}"
+        mode: "0644"
+        content: "{{ _status | to_json }}"
+      vars:
+        _status:
+          ready: "{{ (vm_missing | length == 0) and (vault_k8s_blocking | length == 0) }}"
+          vm_missing: "{{ vm_missing }}"
+          blocking: "{{ vault_k8s_blocking }}"
+          later: "{{ vault_k8s_later }}"
+
+    - name: Récapitulatif
+      ansible.builtin.debug:
+        msg:
+          - "Cluster {{ cluster_org }} — prêt pour le déploiement : {{ 'OUI' if (vm_missing | length == 0 and vault_k8s_blocking | length == 0) else 'NON' }}"
+          - "Secrets VM manquants (devver-infra-deployment/{{ vault_cluster_secret_path }}) : {{ vm_missing | join(', ') or 'aucun' }}"
+          - "Bloquants (kubernetes-cluster/{{ vault_k8s_prefix }}/ — à saisir, ou secret commun manquant dans devver-infra-deployment/shared/) : {{ vault_k8s_blocking | join(', ') or 'aucun' }}"
+          - "Plus tard (après installation, non bloquant) : {{ vault_k8s_later | join(', ') or 'aucun' }}"

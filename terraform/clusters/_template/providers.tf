@@ -70,6 +70,14 @@ module "cluster" {
   vm_user        = data.vault_kv_secret_v2.cluster_secrets.data["vm_user"]
   ssh_public_key = data.vault_kv_secret_v2.cluster_secrets.data["ssh_public_key"]
   vm_password    = data.vault_kv_secret_v2.cluster_secrets.data["vm_password"]
+
+  # Passées à Ansible (inventaire) puis à l'Application racine d'ArgoCD.
+  cluster_vars = {
+    cluster_domain          = "${local.cluster_id}.${var.base_domain}"
+    nfs_server              = var.nfs_server
+    nfs_share               = var.nfs_share
+    kubernetes_git_revision = var.kubernetes_git_revision
+  }
 }
 
 output "cluster_nodes" {

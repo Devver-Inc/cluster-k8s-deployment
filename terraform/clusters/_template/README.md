@@ -29,11 +29,16 @@ dans Vault : `kubernetes-cluster/<org>/<env>/` (voir
    Le symlink `ip-plan.auto.tfvars` de ce dossier est préservé par `cp -r`.
 
 4. Ajuster `node_count`, `tags`, ressources dans `values.auto.tfvars` selon le
-   besoin réel de ce cluster.
+   besoin réel de ce cluster, et renseigner son stockage : `nfs_server` et
+   `nfs_share` — un partage **dédié à ce cluster**, créé au préalable sur le
+   NAS avec un accès NFS réservé aux IP de ses noeuds (jamais le partage de
+   la prod). Optionnel : `base_domain` (défaut `devver.app` → le cluster est
+   servi sous `<org>-<env>.devver.app`) et `kubernetes_git_revision`
+   (révision du repo kubernetes suivie par ArgoCD, défaut `main`).
 
 5. Suivre les étapes 1/2/3 du [README racine](../../README.md#mise-en-place)
    (structure Vault → action manuelle → déploiement infra) pour ce cluster.
 
-6. Après le job `configure`, compléter dans la console Vault les secrets
-   restés à `CHANGEME` sous `kubernetes-cluster/<org>/<env>/` — procédure :
-   `Devver-Inc/kubernetes` → `docs/vault-nouveau-cluster.md`.
+6. Les secrets du cluster sont préparés par la pipeline dès le 1er
+   lancement (job `prepare-secrets`) ; elle s'arrête en listant ce qui reste
+   à saisir avant de créer les VMs — voir `terraform/DEPLOY.md`.

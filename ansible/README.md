@@ -90,21 +90,26 @@ ansible-playbook -i "$INV" -e cluster_org=<org> -e ansible_ssh_private_key_file=
    orchestré par le job `remove-worker` de
    [`provision-cluster.yml`](../.github/workflows/provision-cluster.yml)
    — voir [Retrait d'un worker](#retrait-dun-worker) plus bas.
-5. **`05-vault-k8s.yml`** (1er master + contrôleur) — branche le cluster sur
-   Vault pour les secrets applicatifs consommés par External Secrets Operator.
-   Uniquement pour un cluster nommé `<org>-<prod|staging|dev>` (le job
-   `configure` l'ignore sinon). Il :
+5. **`05-vault-seed.yml`** (contrôleur seul, **avant** la création des VMs —
+   job `prepare-secrets`) — prépare les secrets du cluster :
+   - vérifie les secrets VM (`devver-infra-deployment/<org>/<env>`) ;
+   - pour un cluster `<org>-<prod|staging|dev>`, initialise
+     `kubernetes-cluster/<org>/<env>/*` d'après le catalogue
+     [`vars/vault-k8s-secrets.yml`](vars/vault-k8s-secrets.yml) : valeurs
+     générées, fixes, **copies des secrets communs** saisis une fois dans
+     `devver-infra-deployment/shared/<chemin>`, ou `CHANGEME`. **Une clé
+     existante n'est jamais réécrite** (sauf une clé commune encore à
+     `CHANGEME`, recopiée dès que la valeur commune existe) ;
+   - écrit un statut : prêt si aucun secret VM ni secret bloquant
+     (`shared`/`manual-pre`) ne manque — sinon la pipeline s'arrête avant
+     les VMs (warning), et le même `workflow_dispatch` reprend après saisie.
+6. **`05-vault-k8s.yml`** (1er master + contrôleur) — branche le cluster sur
+   Vault (clusters `<org>-<prod|staging|dev>` uniquement) :
    - crée `kube-system/vault-auth` (ServiceAccount + token longue durée +
      `system:auth-delegator`), le *token reviewer* de Vault ;
    - écrit `auth/k8s-<org>-<env>/config` (API `https://<master1>:6443`, CA
      RKE2, JWT reviewer) — le mount, les policies et les roles sont créés par
-     [`terraform/vault/k8s-secrets.tf`](../terraform/vault/k8s-secrets.tf) ;
-   - initialise `kubernetes-cluster/<org>/<env>/*` d'après le catalogue
-     [`vars/vault-k8s-secrets.yml`](vars/vault-k8s-secrets.yml) : valeurs
-     générées, fixes, ou `CHANGEME` à saisir dans la
-     console. **Une clé existante n'est jamais réécrite** : relançable sans
-     risque, et ajouter une clé au catalogue n'ajoute que celle-là ;
-   - affiche la liste des clés encore à `CHANGEME`.
+     [`terraform/vault/k8s-secrets.tf`](../terraform/vault/k8s-secrets.tf).
 
    Procédure complète côté cluster (saisie console, ordre de déploiement) :
    `Devver-Inc/kubernetes` → `docs/vault-nouveau-cluster.md`.

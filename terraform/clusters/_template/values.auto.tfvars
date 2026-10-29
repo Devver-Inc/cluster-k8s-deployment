@@ -15,6 +15,18 @@ node_count               = 3                # minimum 3 (masters+workers)
 additional_workers_count = 0
 tags                     = ["devver", "REPLACE_ME_ORG", "REPLACE_ME_ENV"]
 
+# Stockage : partage NFS DÉDIÉ à ce cluster, créé au préalable sur le NAS
+# (accès NFS réservé aux IP des noeuds de ce cluster).
+nfs_server = "192.168.10.5"
+nfs_share  = "/volume1/NFS_K8S_REPLACE_ME"
+
+# DNS du cluster : <org>-<env>.<base_domain> (défaut devver.app).
+# base_domain = "devver.app"
+
+# Révision du repo Devver-Inc/kubernetes suivie par ArgoCD (défaut main ;
+# une branche pendant les tests, un tag en prod).
+# kubernetes_git_revision = "feat/vault-eso"
+
 proxmox_node  = "PROXMOX-PVE1"
 datastore_id  = "SSD-PVE-DATA"
 template_name = "rocky9-cloud-template"
