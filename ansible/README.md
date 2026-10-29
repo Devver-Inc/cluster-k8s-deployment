@@ -111,6 +111,22 @@ ansible-playbook -i "$INV" -e cluster_org=<org> -e ansible_ssh_private_key_file=
      RKE2, JWT reviewer) — le mount, les policies et les roles sont créés par
      [`terraform/vault/k8s-secrets.tf`](../terraform/vault/k8s-secrets.tf).
 
+7. **`06-argocd-bootstrap.yml`** (contrôleur, kubeconfig lu dans Vault —
+   clusters `<org>-<prod|staging|dev>`) — installe ArgoCD et lui confie le
+   reste :
+   - crée les Secrets de repo d'Argo (deploy keys SSH de
+     `kubernetes-cluster/<org>/<env>/argocd-repos`) ;
+   - `helm install` d'ArgoCD (`argocd_chart_version`) **seulement s'il est
+     absent** — ensuite Argo se gère lui-même ;
+   - copie le mot de passe admin initial dans Vault (`argocd/admin_password`)
+     puis supprime `argocd-initial-admin-secret` ;
+   - crée l'Application racine (chart `argocd/` de `Devver-Inc/kubernetes`,
+     révision `kubernetes_git_revision`) avec les paramètres du cluster
+     (domaine, IP d'ingress, partage NFS) : toute la stack est déployée par
+     vagues ;
+   - génère le token du compte `backend-api` dans Vault
+     (`backend/ARGOCD_API_KEY`) dès que l'Application `argocd` l'a créé.
+
    Procédure complète côté cluster (saisie console, ordre de déploiement) :
    `Devver-Inc/kubernetes` → `docs/vault-nouveau-cluster.md`.
 

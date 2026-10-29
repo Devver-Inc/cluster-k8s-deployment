@@ -1,0 +1,325 @@
+---
+# Bootstrap d'ArgoCD sur un cluster <org>-<prod|staging|dev> — dernier
+# playbook du job "configure". Tout le reste de la stack est ensuite déployé
+# par ArgoCD (Application racine = chart argocd/ de Devver-Inc/kubernetes,
+# sync waves). Tourne sur le contrôleur (conteneur du runner : helm,
+# kubectl), avec le kubeconfig du cluster lu dans Vault.
+#
+# 1. Secrets de repo d'Argo (deploy keys SSH, lues dans
+#    kubernetes-cluster/<org>/<env>/argocd-repos) — ensuite tenus à jour par
+#    l'ExternalSecret de platform-secrets.
+# 2. helm install d'ArgoCD (version figée), UNIQUEMENT s'il est absent : une
+#    fois installé, Argo se gère lui-même (Application "argocd") — une relance
+#    ne doit pas revenir à cette configuration minimale.
+# 3. Mot de passe admin : argocd-initial-admin-secret -> Vault
+#    (argocd/admin_password), puis suppression du Secret.
+# 4. Application racine (paramètres du cluster venant de l'inventaire).
+# 5. Token du compte backend-api -> Vault (backend/ARGOCD_API_KEY), dès que
+#    l'Application "argocd" a créé le compte ; force-sync de backend-secret.
+# Étapes 3 et 5 : seulement si la valeur dans Vault vaut encore CHANGEME.
+#
+# Usage :
+#   ansible-playbook -i <inventaire> -e cluster_org=<org>-<env> playbooks/06-argocd-bootstrap.yml
+
+- name: Bootstrap ArgoCD (Application racine)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    vault_k8s_kv_mount: kubernetes-cluster
+    vault_k8s_org: "{{ cluster_org | regex_replace(cluster_id_regex, '\\1') }}"
+    vault_k8s_env: "{{ cluster_org | regex_replace(cluster_id_regex, '\\2') }}"
+    vault_k8s_prefix: "{{ vault_k8s_org }}/{{ vault_k8s_env }}"
+    # Variables du cluster ([k8s_cluster:vars] de l'inventaire, Terraform)
+    cl: "{{ hostvars[groups['server'][0]] }}"
+    argocd_repos:
+      - name: repo-kubernetes
+        url: git@github.com:Devver-Inc/kubernetes.git
+        key: kubernetes
+      - name: repo-client-deployment
+        url: git@github.com:Devver-Inc/argocd-client-deployment.git
+        key: client-deployment
+    # Attente du compte backend-api (synchro de l'Application "argocd")
+    argocd_account_retries: 60
+    argocd_account_delay: 15
+
+  tasks:
+    - name: Vérifier le cluster et ses paramètres
+      ansible.builtin.assert:
+        that:
+          - cluster_org is regex(cluster_id_regex)
+          - cl.cluster_domain is defined
+          - cl.nfs_server is defined
+          - cl.nfs_share is defined
+          - cl.metallb_ip is defined
+        fail_msg: >-
+          Cluster '{{ cluster_org }}' : format <org>-<env> et variables d'inventaire
+          cluster_domain / nfs_server / nfs_share / metallb_ip requis (template de
+          cluster à jour : terraform/clusters/_template).
+        quiet: true
+
+    - name: Kubeconfig temporaire
+      ansible.builtin.tempfile:
+        suffix: .kubeconfig
+      register: _kubeconfig
+
+    - name: Bootstrap
+      environment:
+        KUBECONFIG: "{{ _kubeconfig.path }}"
+      block:
+        - name: Écrire le kubeconfig (lu dans Vault, devver-infra-deployment)
+          ansible.builtin.copy:
+            dest: "{{ _kubeconfig.path }}"
+            content: "{{ cluster_secrets.kubeconfig }}"
+            mode: "0600"
+          no_log: true
+
+        # --- 1. Repos privés -------------------------------------------------
+        - name: Lire les deploy keys (argocd-repos)
+          community.hashi_vault.vault_kv2_get:
+            url: "{{ vault_addr }}"
+            auth_method: "{{ vault_auth_method }}"
+            mount_point: "{{ vault_auth_mount_point }}"
+            role_id: "{{ vault_role_id }}"
+            secret_id: "{{ vault_secret_id }}"
+            engine_mount_point: "{{ vault_k8s_kv_mount }}"
+            path: "{{ vault_k8s_prefix }}/argocd-repos"
+          register: _repos
+          no_log: true
+
+        - name: Namespace argocd
+          ansible.builtin.command:
+            cmd: kubectl create namespace argocd
+          register: _ns
+          changed_when: _ns.rc == 0
+          failed_when: _ns.rc != 0 and 'AlreadyExists' not in _ns.stderr
+
+        - name: Secrets de repo d'ArgoCD
+          ansible.builtin.command:
+            cmd: kubectl apply -f -
+            stdin: |
+              apiVersion: v1
+              kind: Secret
+              metadata:
+                name: {{ item.name }}
+                namespace: argocd
+                labels:
+                  argocd.argoproj.io/secret-type: repository
+              type: Opaque
+              stringData:
+                type: git
+                url: {{ item.url }}
+                sshPrivateKey: |
+              {{ _repos.secret[item.key] | trim | indent(4, true) }}
+          loop: "{{ argocd_repos }}"
+          loop_control:
+            label: "{{ item.name }}"
+          register: _repo_apply
+          changed_when: "'unchanged' not in _repo_apply.stdout"
+          no_log: true
+
+        # --- 2. ArgoCD ---------------------------------------------------------
+        - name: ArgoCD déjà installé ?
+          ansible.builtin.command:
+            cmd: helm status argocd -n argocd
+          register: _argocd_release
+          changed_when: false
+          failed_when: false
+
+        - name: "Installer ArgoCD (chart argo-cd {{ argocd_chart_version }})"
+          ansible.builtin.command:
+            cmd: >-
+              helm upgrade --install argocd argo-cd
+              --repo https://argoproj.github.io/argo-helm
+              --version {{ argocd_chart_version }}
+              --namespace argocd --wait --timeout 10m
+          when: _argocd_release.rc != 0
+
+        # --- 3. Mot de passe admin -> Vault ------------------------------------
+        - name: Lire argocd/ dans Vault
+          community.hashi_vault.vault_kv2_get:
+            url: "{{ vault_addr }}"
+            auth_method: "{{ vault_auth_method }}"
+            mount_point: "{{ vault_auth_mount_point }}"
+            role_id: "{{ vault_role_id }}"
+            secret_id: "{{ vault_secret_id }}"
+            engine_mount_point: "{{ vault_k8s_kv_mount }}"
+            path: "{{ vault_k8s_prefix }}/argocd"
+          register: _argocd_vault
+          no_log: true
+
+        - name: Copier le mot de passe admin dans Vault
+          when: (_argocd_vault.secret.admin_password | default('CHANGEME')) == 'CHANGEME'
+          block:
+            - name: Lire argocd-initial-admin-secret
+              ansible.builtin.command:
+                cmd: kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath={.data.password}
+              register: _initial_admin
+              changed_when: false
+              no_log: true
+
+            - name: "Écrire {{ vault_k8s_prefix }}/argocd/admin_password"
+              community.hashi_vault.vault_kv2_write:
+                url: "{{ vault_addr }}"
+                auth_method: "{{ vault_auth_method }}"
+                mount_point: "{{ vault_auth_mount_point }}"
+                role_id: "{{ vault_role_id }}"
+                secret_id: "{{ vault_secret_id }}"
+                engine_mount_point: "{{ vault_k8s_kv_mount }}"
+                path: "{{ vault_k8s_prefix }}/argocd"
+                data: "{{ _argocd_vault.secret | default({}) | combine({'admin_password': _initial_admin.stdout | b64decode}) }}"
+              no_log: true
+
+            - name: Supprimer argocd-initial-admin-secret (le mot de passe est dans Vault)
+              ansible.builtin.command:
+                cmd: kubectl -n argocd delete secret argocd-initial-admin-secret
+
+        # --- 4. Application racine -------------------------------------------------
+        - name: Application racine (chart argocd/ du repo kubernetes)
+          ansible.builtin.command:
+            cmd: kubectl apply -f -
+            stdin: |
+              apiVersion: argoproj.io/v1alpha1
+              kind: Application
+              metadata:
+                name: root
+                namespace: argocd
+              spec:
+                project: default
+                destination:
+                  server: https://kubernetes.default.svc
+                  namespace: argocd
+                source:
+                  repoURL: {{ argocd_root_repo }}
+                  targetRevision: {{ cl.kubernetes_git_revision | default('main') }}
+                  path: argocd
+                  helm:
+                    valuesObject:
+                      cluster:
+                        org: "{{ vault_k8s_org }}"
+                        env: "{{ vault_k8s_env }}"
+                        domain: "{{ cl.cluster_domain }}"
+                        ingressIP: "{{ cl.metallb_ip }}"
+                      nfs:
+                        server: "{{ cl.nfs_server }}"
+                        share: "{{ cl.nfs_share }}"
+                      git:
+                        kubernetes:
+                          revision: "{{ cl.kubernetes_git_revision | default('main') }}"
+                syncPolicy:
+                  automated:
+                    prune: true
+                    selfHeal: true
+                  retry:
+                    limit: 10
+                    backoff:
+                      duration: 10s
+                      factor: 2
+                      maxDuration: 5m
+          register: _root
+          changed_when: "'unchanged' not in _root.stdout"
+
+        # --- 5. Token du backend -> Vault -----------------------------------------
+        - name: Lire backend/ dans Vault
+          community.hashi_vault.vault_kv2_get:
+            url: "{{ vault_addr }}"
+            auth_method: "{{ vault_auth_method }}"
+            mount_point: "{{ vault_auth_mount_point }}"
+            role_id: "{{ vault_role_id }}"
+            secret_id: "{{ vault_secret_id }}"
+            engine_mount_point: "{{ vault_k8s_kv_mount }}"
+            path: "{{ vault_k8s_prefix }}/backend"
+          register: _backend_vault
+          no_log: true
+
+        - name: Générer le token du compte backend-api
+          when: (_backend_vault.secret.ARGOCD_API_KEY | default('CHANGEME')) == 'CHANGEME'
+          block:
+            # Compte déclaré par l'Application "argocd" (wave -5) : attendre sa synchro.
+            - name: Attendre le compte backend-api dans argocd-cm
+              ansible.builtin.command:
+                cmd: kubectl -n argocd get configmap argocd-cm -o jsonpath={.data.accounts\.backend-api}
+              register: _account
+              until: _account.stdout == 'apiKey'
+              retries: "{{ argocd_account_retries }}"
+              delay: "{{ argocd_account_delay }}"
+              changed_when: false
+
+            - name: Relire le mot de passe admin
+              community.hashi_vault.vault_kv2_get:
+                url: "{{ vault_addr }}"
+                auth_method: "{{ vault_auth_method }}"
+                mount_point: "{{ vault_auth_mount_point }}"
+                role_id: "{{ vault_role_id }}"
+                secret_id: "{{ vault_secret_id }}"
+                engine_mount_point: "{{ vault_k8s_kv_mount }}"
+                path: "{{ vault_k8s_prefix }}/argocd"
+              register: _argocd_admin
+              no_log: true
+
+            # CLI argocd du pod argocd-server, en local dans le pod (localhost:8080) :
+            # en clair si server.insecure (config de l'Application "argocd"),
+            # sinon TLS auto-signé.
+            - name: Générer le token (argocd account generate-token)
+              ansible.builtin.command:
+                argv:
+                  - kubectl
+                  - -n
+                  - argocd
+                  - exec
+                  - deploy/argocd-server
+                  - --
+                  - sh
+                  - -c
+                  - >-
+                    ADMIN_PW={{ _argocd_admin.secret.admin_password | quote }};
+                    { argocd login localhost:8080 --plaintext --username admin --password "$ADMIN_PW" >/dev/null 2>&1
+                    || argocd login localhost:8080 --insecure --username admin --password "$ADMIN_PW" >/dev/null; }
+                    && argocd account generate-token --account backend-api
+              register: _token
+              changed_when: true
+              no_log: true
+
+            - name: "Écrire {{ vault_k8s_prefix }}/backend/ARGOCD_API_KEY"
+              community.hashi_vault.vault_kv2_write:
+                url: "{{ vault_addr }}"
+                auth_method: "{{ vault_auth_method }}"
+                mount_point: "{{ vault_auth_mount_point }}"
+                role_id: "{{ vault_role_id }}"
+                secret_id: "{{ vault_secret_id }}"
+                engine_mount_point: "{{ vault_k8s_kv_mount }}"
+                path: "{{ vault_k8s_prefix }}/backend"
+                data: "{{ _backend_vault.secret | combine({'ARGOCD_API_KEY': _token.stdout | trim}) }}"
+              no_log: true
+
+            - name: Forcer la synchro de backend-secret (si déjà créé par Argo)
+              ansible.builtin.command:
+                cmd: >-
+                  kubectl -n devver-backend-service annotate externalsecret backend-secret
+                  force-sync={{ now(utc=true, fmt='%s') }} --overwrite
+              register: _fs
+              changed_when: _fs.rc == 0
+              failed_when: false
+
+        # --- Récapitulatif -----------------------------------------------------------
+        - name: État des Applications
+          ansible.builtin.command:
+            cmd: kubectl -n argocd get applications -o custom-columns=NAME:.metadata.name,WAVE:.metadata.annotations.argocd\.argoproj\.io/sync-wave,SYNC:.status.sync.status,HEALTH:.status.health.status
+          register: _apps
+          changed_when: false
+          failed_when: false
+
+        - name: Récapitulatif
+          ansible.builtin.debug:
+            msg:
+              - "ArgoCD : https://argocd.{{ cl.cluster_domain }} (admin : mot de passe dans {{ vault_k8s_kv_mount }}/{{ vault_k8s_prefix }}/argocd) — en attendant le DNS : kubectl -n argocd port-forward svc/argocd-server 8080:80"
+              - "Application racine : root ({{ argocd_root_repo }}, révision {{ cl.kubernetes_git_revision | default('main') }}, chemin argocd/)"
+              - "{{ _apps.stdout_lines | default([]) }}"
+              - "Après installation : saisir backend/LOGTO_* dans Vault une fois Logto configuré."
+
+      always:
+        - name: Supprimer le kubeconfig temporaire
+          ansible.builtin.file:
+            path: "{{ _kubeconfig.path }}"
+            state: absent

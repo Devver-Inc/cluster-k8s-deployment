@@ -575,13 +575,15 @@ jobs:
           ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/02-dependencies.yml
           ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/03-cluster-init.yml
 
-          # Secrets applicatifs (ESO ↔ Vault) : uniquement pour les clusters
+          # Vault (auth Kubernetes) puis ArgoCD : uniquement pour les clusters
           # nommés <org>-<env>, seuls à avoir une structure kubernetes-cluster/
-          # (terraform/vault/k8s-secrets.tf). Idempotent, relançable sans risque.
+          # (terraform/vault/k8s-secrets.tf). Idempotents, relançables sans risque.
           if [[ "${{ matrix.org }}" =~ ^[a-z0-9][a-z0-9-]*-(prod|staging|dev)$ ]]; then
             ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/05-vault-k8s.yml
+            # ArgoCD + Application racine : déploie ensuite toute la stack (sync waves).
+            ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/06-argocd-bootstrap.yml
           else
-            echo "Cluster '${{ matrix.org }}' sans suffixe d'env : 05-vault-k8s.yml ignoré."
+            echo "Cluster '${{ matrix.org }}' sans suffixe d'env : 05-vault-k8s.yml et 06-argocd-bootstrap.yml ignorés."
           fi
 
   # configure tourne en root dans son conteneur (symlink group_vars,

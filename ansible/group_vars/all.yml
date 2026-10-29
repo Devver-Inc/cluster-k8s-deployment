@@ -30,6 +30,12 @@ rke2_version: "v1.36.5+rke2r1"
 # (metallb_ip, inventaire) et la donne au Service LoadBalancer de Traefik.
 metallb_chart_version: "0.16.1"
 
+# Chart argo-cd installé au bootstrap (06-argocd-bootstrap.yml) — garder
+# identique à versions.argocd de Devver-Inc/kubernetes (argocd/values.yaml),
+# l'Application "argocd" reprenant ensuite la même release.
+argocd_chart_version: "10.10.3"
+argocd_root_repo: git@github.com:Devver-Inc/kubernetes.git
+
 # IP du 1er master du groupe [server] — point d'entrée unique pour la
 # jonction des autres masters/agents (pas de VIP/HAProxy pour l'instant,
 # cf. terraform/README.md et ansible/README.md pour la migration future).
