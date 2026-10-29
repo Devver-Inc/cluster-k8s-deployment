@@ -101,8 +101,21 @@
             valuesContent: |-
               service:
                 type: LoadBalancer
+                # Le chart rke2-traefik impose service.spec.type: ClusterIP,
+                # qui écrase service.type : il faut le surcharger aussi.
+                spec:
+                  type: LoadBalancer
                 annotations:
                   metallb.io/loadBalancerIPs: "{{ metallb_ip }}"
+              ports:
+                websecure:
+                  # En-têtes de sécurité sur toutes les routes HTTPS (repris de
+                  # kubernetes/traefik/traefik-values.yaml). Le Middleware
+                  # kube-system/security-headers est déployé par ArgoCD (wave 0) ;
+                  # d'ici là, les routes websecure sont en erreur — attendu au
+                  # bootstrap (l'UI Argo est joignable par port-forward).
+                  middlewares:
+                    - kube-system-security-headers@kubernetescrd
 
     - name: "Écrire la config RKE2 du premier master (pas de champ server, c'est lui le point d'entrée)"
       ansible.builtin.copy:

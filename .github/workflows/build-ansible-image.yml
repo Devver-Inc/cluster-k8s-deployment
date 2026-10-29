@@ -1,0 +1,61 @@
+name: Build Ansible runner image
+
+# Construit l'image des jobs Ansible de provision-cluster.yml (configure,
+# remove-worker). Tag = empreinte du Dockerfile + ansible/requirements.yml
+# (même calcul que le job check-ansible-image de provision-cluster.yml) :
+# chaque modification de ces fichiers donne une nouvelle image, sans version
+# à incrémenter à la main. Déclenché par le push qui les modifie, sur
+# n'importe quelle branche — l'image est donc prête avant qu'on lance le
+# déploiement de cette branche. workflow_dispatch : reconstruction à la demande
+# (ex: image supprimée de GHCR).
+on:
+  push:
+    paths:
+      - "runner-images/ansible/**"
+      - "ansible/requirements.yml"
+      - ".github/workflows/build-ansible-image.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: build-ansible-image-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository }}/ansible-runner
+
+jobs:
+  build:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: tag
+        run: |
+          # GHCR exige un nom de repository en minuscules (github.repository
+          # garde la casse réelle, ex: Devver-Inc).
+          hash="${{ hashFiles('runner-images/ansible/Dockerfile', 'ansible/requirements.yml') }}"
+          echo "image=${IMAGE_NAME,,}:${hash:0:16}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Une image déjà présente pour cette empreinte n'est jamais reconstruite.
+      - name: Build & push (si absente)
+        run: |
+          set -euo pipefail
+          IMAGE="${{ steps.tag.outputs.image }}"
+          if docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
+            echo "Image $IMAGE déjà présente sur GHCR, build sauté."
+          else
+            docker build -f runner-images/ansible/Dockerfile -t "$IMAGE" .
+            docker push "$IMAGE"
+            echo "Image $IMAGE construite et poussée."
+          fi

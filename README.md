@@ -52,9 +52,9 @@ Voir [`terraform/DEPLOY.md`](terraform/DEPLOY.md) et
 
 ```
 .
-├── .github/workflows/       # pipeline CI (provision-cluster.yml — Vault + Proxmox + Ansible en un seul workflow)
+├── .github/workflows/       # pipeline CI : provision-cluster.yml (Vault + Proxmox + Ansible), build-ansible-image.yml (image du runner)
 ├── runner-images/
-│   └── ansible/              # Dockerfile (versionné via IMAGE_VERSION=) de l'image du job Ansible (voir ansible/README.md#isolation)
+│   └── ansible/              # Dockerfile de l'image du job Ansible, taguée par l'empreinte de son contenu (voir ansible/README.md#isolation)
 ├── terraform/
 │   ├── README.md            # documentation technique détaillée (le "pourquoi")
 │   ├── DEPLOY.md            # procédure pas-à-pas, manuelle ET pipeline (le "comment")

@@ -1,13 +1,11 @@
-# Image des jobs "configure" et "remove-worker" du workflow "2 - Proxmox:
-# apply/destroy cluster" — buildée et poussée sur GHCR par le job
-# build-ansible-image, réutilisée tant que la version ci-dessous ne change
-# pas (voir .github/workflows/proxmox-deploy-cluster.yml, qui extrait cette
-# ligne par grep pour construire le tag de l'image).
+# Image des jobs "configure" et "remove-worker" de provision-cluster.yml —
+# construite et poussée sur GHCR par .github/workflows/build-ansible-image.yml.
 #
-# IMAGE_VERSION=15
-#
-# Incrémenter cette version à chaque changement de ce Dockerfile ou de
-# ansible/requirements.yml, pour forcer un rebuild/push.
+# Tag = empreinte du contenu (hashFiles de ce Dockerfile + ansible/requirements.yml),
+# calculée à l'identique par les deux workflows : toute modification de l'un
+# de ces fichiers produit une nouvelle image, sans version à incrémenter.
+# Le push qui modifie ces fichiers déclenche le build ; provision-cluster.yml
+# (job detect) refuse de démarrer si l'image correspondante n'existe pas.
 #
 # Contient tout ce dont le job a besoin, y compris le login Vault
 # (hashicorp/vault-action tourne dans ce même conteneur) : Ansible + la
@@ -34,10 +32,12 @@
 FROM python:3.12-slim
 
 ARG VAULT_VERSION=1.17.6
-# Alignée sur rke2_version dans ansible/group_vars/all.yml (v1.30.5+rke2r1) —
+# Alignée sur rke2_version dans ansible/group_vars/all.yml (v1.36.5+rke2r1) —
 # kubectl reste compatible +/- 1 version mineure avec le serveur, mais autant
 # matcher précisément.
-ARG KUBECTL_VERSION=v1.30.5
+ARG KUBECTL_VERSION=v1.36.5
+# Bootstrap d'ArgoCD (playbooks/06-argocd-bootstrap.yml : helm upgrade --install).
+ARG HELM_VERSION=v3.22.0
 # Alignée sur la version utilisée par les jobs Terraform à plat du même
 # workflow (create-cluster, add-worker, delete-cluster) — pas de contrainte
 # stricte de compatibilité ici, mais autant rester cohérent.
@@ -62,6 +62,11 @@ RUN apt-get update \
     && curl -fsSL -o /usr/local/bin/kubectl \
         "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
     && chmod +x /usr/local/bin/kubectl \
+    && curl -fsSL -o /tmp/helm.tgz \
+        "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
+    && tar -xzf /tmp/helm.tgz -C /tmp linux-amd64/helm \
+    && mv /tmp/linux-amd64/helm /usr/local/bin/helm \
+    && rm -rf /tmp/helm.tgz /tmp/linux-amd64 \
     && rm -rf /var/lib/apt/lists/*
 
 # Version épinglée strictement : ~=2.17 résolvait vers 2.21.4 (probablement

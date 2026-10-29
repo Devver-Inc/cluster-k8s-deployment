@@ -76,7 +76,6 @@ on:
       - "terraform/clusters/**"
       - "terraform/scripts/**"
       - "ansible/**"
-      - "runner-images/ansible/**"
       - ".github/workflows/provision-cluster.yml"
   workflow_dispatch:
     inputs:
@@ -380,14 +379,19 @@ jobs:
             git push origin "HEAD:${{ github.ref_name }}"
           fi
 
-  # --- Build de l'image Docker Ansible (réutilisée par configure + remove-worker) ---
+  # --- Image Docker Ansible (réutilisée par configure + remove-worker) ---
+  # Construite par .github/workflows/build-ansible-image.yml (déclenché par le
+  # push qui modifie le Dockerfile ou ansible/requirements.yml), jamais ici.
+  # Tag = empreinte de ces deux fichiers, calculée à l'identique dans les deux
+  # workflows : si l'image de CE commit n'existe pas encore, on s'arrête
+  # avant toute action plutôt que de tourner avec une image périmée.
 
-  build-ansible-image:
+  check-ansible-image:
     needs: detect
     if: needs.detect.outputs.orgs_create != '[]' || needs.detect.outputs.orgs_add_worker != '[]' || needs.detect.outputs.orgs_remove_worker != '[]'
     runs-on: self-hosted
     permissions:
-      packages: write
+      packages: read
       contents: read
     outputs:
       image: ${{ steps.tag.outputs.image }}
@@ -396,11 +400,10 @@ jobs:
 
       - id: tag
         run: |
-          version="$(grep -oP '^# IMAGE_VERSION=\K.+' runner-images/ansible/Dockerfile)"
           # GHCR exige un nom de repository en minuscules — github.repository
           # garde la casse réelle de l'owner/repo GitHub (ex: Devver-Inc).
-          image_name="${IMAGE_NAME,,}"
-          echo "image=${image_name}:${version}" >> "$GITHUB_OUTPUT"
+          hash="${{ hashFiles('runner-images/ansible/Dockerfile', 'ansible/requirements.yml') }}"
+          echo "image=${IMAGE_NAME,,}:${hash:0:16}" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -409,35 +412,31 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Réutilise l'image si elle existe déjà sur GHCR pour cette version —
-      # rebuild uniquement quand la ligne IMAGE_VERSION= du Dockerfile a été
-      # incrémentée (donc quand le Dockerfile ou requirements.yml a changé).
-      - name: Build & push Ansible runner image (si absente pour cette version)
+      - name: Vérifier que l'image de ce commit existe
         run: |
-          set -euo pipefail
           IMAGE="${{ steps.tag.outputs.image }}"
           if docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
-            echo "Image $IMAGE déjà présente sur GHCR, build sauté."
+            echo "Image $IMAGE présente."
           else
-            docker build -f runner-images/ansible/Dockerfile -t "$IMAGE" .
-            docker push "$IMAGE"
+            echo "::error::Image $IMAGE absente de GHCR : le Dockerfile ou ansible/requirements.yml a changé. Lancer (ou attendre la fin de) 'Build Ansible runner image' sur la branche ${{ github.ref_name }}, puis relancer ce workflow."
+            exit 1
           fi
 
   # --- Configuration Ansible (après create-cluster ou add-worker) --------
 
   configure:
-    needs: [detect, create-cluster, add-worker, build-ansible-image]
+    needs: [detect, create-cluster, add-worker, check-ansible-image]
     # Se déclenche dès que l'un des deux jobs Terraform amont a réussi, sans
     # être bloqué si l'autre a été skip (pas concerné ce run) — seul un
     # ÉCHEC explicite de l'un des deux empêche Ansible de tourner.
     if: |
       always() &&
       needs.create-cluster.result != 'failure' && needs.add-worker.result != 'failure' &&
-      needs.build-ansible-image.result == 'success' &&
+      needs.check-ansible-image.result == 'success' &&
       needs.detect.outputs.orgs_configure != '[]'
     runs-on: self-hosted
     container:
-      image: ${{ needs.build-ansible-image.outputs.image }}
+      image: ${{ needs.check-ansible-image.outputs.image }}
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
@@ -546,7 +545,7 @@ jobs:
   # --- Retrait de worker (drain + désinscription AVANT destruction VM) ---
 
   remove-worker:
-    needs: [detect, build-ansible-image]
+    needs: [detect, check-ansible-image]
     if: needs.detect.outputs.orgs_remove_worker != '[]'
     runs-on: self-hosted
     # Tout le job tourne dans le conteneur Docker Ansible (kubectl + vault +
@@ -565,7 +564,7 @@ jobs:
     # tourne à plat (container: est une clé de job, impossible de mélanger
     # un step conteneurisé et un step à plat dans le même job).
     container:
-      image: ${{ needs.build-ansible-image.outputs.image }}
+      image: ${{ needs.check-ansible-image.outputs.image }}
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}

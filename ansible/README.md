@@ -167,14 +167,18 @@ n'a besoin que de Docker installé — ni Ansible, ni le CLI `vault`/`kubectl`,
 ni la collection `community.hashi_vault` ne sont requis à plat.
 
 L'image contient : `ansible-core`, la collection `community.hashi_vault`, le
-CLI `vault`, `kubectl`, `git` (pour `actions/checkout`) et un client SSH.
-Elle est buildée par le job `build-ansible-image` et poussée sur GHCR
-(`ghcr.io/<owner>/<repo>/ansible-runner`, package privé rattaché au repo),
-**taguée par la ligne `# IMAGE_VERSION=` en tête du
-[`Dockerfile`](../runner-images/ansible/Dockerfile)** — `build-ansible-image`
-réutilise l'image si ce tag existe déjà sur GHCR, et ne rebuild/push que si
-cette version a été incrémentée manuellement (à faire à chaque changement du
-`Dockerfile` ou de `ansible/requirements.yml`). Un registry est nécessaire
+CLI `vault`, `kubectl`, `helm`, `terraform`, `git` (pour `actions/checkout`) et
+un client SSH. Elle est construite par le workflow dédié
+[`build-ansible-image.yml`](../.github/workflows/build-ansible-image.yml) et
+poussée sur GHCR (`ghcr.io/<owner>/<repo>/ansible-runner`, package privé
+rattaché au repo), **taguée par l'empreinte du
+[`Dockerfile`](../runner-images/ansible/Dockerfile) et de
+`ansible/requirements.yml`** : aucune version à incrémenter, toute
+modification de ces fichiers donne une nouvelle image. Le build est déclenché
+par le push qui les modifie (n'importe quelle branche) ou à la main ; le job
+`check-ansible-image` de `provision-cluster.yml` refuse de démarrer si l'image
+de ce commit n'existe pas encore sur GHCR (attendre la fin du build, ou le
+lancer à la main). Un registry est nécessaire
 même en 100% self-hosted : un job qui déclare `container:` fait toujours un
 `docker pull` avant de démarrer, sans fallback sur le cache Docker local de la
 machine.
