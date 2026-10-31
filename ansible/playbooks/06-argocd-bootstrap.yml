@@ -239,7 +239,18 @@
             # Compte déclaré par l'Application "argocd" (wave -5) : attendre sa synchro.
             - name: Attendre le compte backend-api dans argocd-cm
               ansible.builtin.command:
-                cmd: kubectl -n argocd get configmap argocd-cm -o jsonpath={.data.accounts\.backend-api}
+                # argv (et non cmd) : avec cmd, Ansible découpe la ligne comme un shell
+                # et retire l'antislash — jsonpath cherchait alors accounts > backend-api
+                # (toujours vide) au lieu de la clé "accounts.backend-api".
+                argv:
+                  - kubectl
+                  - -n
+                  - argocd
+                  - get
+                  - configmap
+                  - argocd-cm
+                  - -o
+                  - jsonpath={.data.accounts\.backend-api}
               register: _account
               until: _account.stdout == 'apiKey'
               retries: "{{ argocd_account_retries }}"
@@ -305,7 +316,14 @@
         # --- Récapitulatif -----------------------------------------------------------
         - name: État des Applications
           ansible.builtin.command:
-            cmd: kubectl -n argocd get applications -o custom-columns=NAME:.metadata.name,WAVE:.metadata.annotations.argocd\.argoproj\.io/sync-wave,SYNC:.status.sync.status,HEALTH:.status.health.status
+            argv:
+              - kubectl
+              - -n
+              - argocd
+              - get
+              - applications
+              - -o
+              - custom-columns=NAME:.metadata.name,WAVE:.metadata.annotations.argocd\.argoproj\.io/sync-wave,SYNC:.status.sync.status,HEALTH:.status.health.status
           register: _apps
           changed_when: false
           failed_when: false
