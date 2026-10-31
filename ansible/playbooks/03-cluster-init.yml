@@ -114,8 +114,11 @@
                   # kube-system/security-headers est déployé par ArgoCD (wave 0) ;
                   # d'ici là, les routes websecure sont en erreur — attendu au
                   # bootstrap (l'UI Argo est joignable par port-forward).
-                  middlewares:
-                    - kube-system-security-headers@kubernetescrd
+                  # Chart rke2-traefik (v40) : sous http.middlewares —
+                  # ports.websecure.middlewares est ignoré (constaté sur vr27-dev).
+                  http:
+                    middlewares:
+                      - kube-system-security-headers@kubernetescrd
 
     - name: "Écrire la config RKE2 du premier master (pas de champ server, c'est lui le point d'entrée)"
       ansible.builtin.copy:
