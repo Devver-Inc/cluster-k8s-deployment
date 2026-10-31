@@ -311,7 +311,8 @@ pour relancer :
 - Pousser un commit (même trivial) touchant `terraform/clusters/<org>/`.
 > **Création d'un cluster entièrement par la pipeline (2 lancements)** :
 > 0. prérequis : le partage NFS du cluster existe sur le NAS (`nfs_share`,
->    accès réservé aux IP du cluster) ; les secrets communs sont saisis une
+>    accès réservé aux IP du cluster, squash « Aucun mappage », mêmes
+>    permissions que la prod) ; les secrets communs sont saisis une
 >    fois pour toutes dans `devver-infra-deployment/shared/` (`ghcr`,
 >    `github`, `cloudflare`, `argocd-repos`) ;
 > 1. pousser `terraform/clusters/<org>-<env>/` sur la branche, puis

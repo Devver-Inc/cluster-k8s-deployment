@@ -32,7 +32,9 @@ dans Vault : `kubernetes-cluster/<org>/<env>/` (voir
    besoin réel de ce cluster, et renseigner son stockage : `nfs_server` et
    `nfs_share` — un partage **dédié à ce cluster**, créé au préalable sur le
    NAS avec un accès NFS réservé aux IP de ses noeuds (jamais le partage de
-   la prod). Optionnel : `base_domain` (défaut `devver.app` → le cluster est
+   la prod) : lecture/écriture, squash « Aucun mappage », `AUTH_SYS`, mêmes
+   permissions de dossier que la prod (règle de propriété du NAS : voir
+   `docs/vault-nouveau-cluster.md` du repo kubernetes, section « Stockage NFS »). Optionnel : `base_domain` (défaut `devver.app` → le cluster est
    servi sous `<org>-<env>.devver.app`) et `kubernetes_git_revision`
    (révision du repo kubernetes suivie par ArgoCD, défaut `main`).
 
