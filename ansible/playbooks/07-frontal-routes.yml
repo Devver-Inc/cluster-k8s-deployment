@@ -98,74 +98,79 @@
         - item.name not in _managed
         - (item.servers | default([]) | intersect(_targets) | length) > 0
 
+    # Formulaires /delete et /save de Traefik Manager : l'en-tête
+    # X-Requested-With: fetch donne une réponse JSON (sinon un refus n'est
+    # qu'une redirection 302 vers /).
     - name: Supprimer les routes manuelles remplacées
       ansible.builtin.uri:
         url: "{{ frontal_api }}/delete/{{ item.name | urlencode }}"
         method: POST
-        headers: "{{ frontal_headers }}"
+        headers: "{{ frontal_headers | combine({'X-Requested-With': 'fetch'}) }}"
         body_format: form-urlencoded
         body:
           configFile: "{{ item.configFile | default(frontal_config_file) }}"
-        # /delete et /save sont des formulaires : succès = redirection 302 vers /
         follow_redirects: none
         status_code: [200, 302]
       loop: "{{ _legacy | default([]) }}"
       loop_control:
         label: "{{ item.id }} -> {{ item.servers | join(', ') }}"
 
-    - name: Créer les routes absentes
+    # Une route est (ré)écrite si elle est absente ou a dérivé (règle, cible,
+    # priorité, passthrough). Champs répétés (entryPoints, targetIp/Port) :
+    # 2e valeur = TCP pour le formulaire ; la cible et la priorité passent par
+    # backendsJsonTcp.
+    - name: Créer ou corriger les routes
+      vars:
+        _id: "{{ frontal_config_file ~ '::' ~ item.name }}"
+        _current: "{{ _routes.json.apps | default([]) | selectattr('id', 'equalto', _id) | first | default({}) }}"
+        _target: "{{ cluster_ip ~ ':' ~ (item.port | string) }}"
+        _up_to_date: >-
+          {{ _current != {}
+             and _current.rule | default('') == item.rule
+             and _current.servers | default([]) == [_target]
+             and (_current.priority | default(0) | int) == (item.priority | int)
+             and (_current.tls | default({})).passthrough | default(false) }}
       ansible.builtin.uri:
         url: "{{ frontal_api }}/save"
         method: POST
-        headers: "{{ frontal_headers }}"
+        headers: "{{ frontal_headers | combine({'X-Requested-With': 'fetch'}) }}"
         body_format: form-urlencoded
         body:
-          serviceName: "{{ item.name }}"
-          subdomain: "{{ item.host }}"
-          protocol: tcp
-          targetIp: "{{ cluster_ip }}"
-          targetPort: "{{ item.port | string }}"
-          configFile: "{{ frontal_config_file }}"
-        follow_redirects: none
-        status_code: [200, 302]
+          - [serviceName, "{{ item.name }}"]
+          - [protocol, tcp]
+          - [tcpRule, "{{ item.rule }}"]
+          - [entryPoints, ""]
+          - [entryPoints, "{{ frontal_entrypoint }}"]
+          - [tlsPassthrough, "true"]
+          - [backendsJsonTcp, "{{ {'servers': [{'host': cluster_ip, 'port': item.port | string}], 'priority': item.priority | int} | to_json }}"]
+          - [configFile, "{{ frontal_config_file }}"]
+          - [isEdit, "{{ 'true' if _current != {} else 'false' }}"]
+          - [originalId, "{{ _id if _current != {} else '' }}"]
+        status_code: [200]
       loop: "{{ frontal_routes }}"
       loop_control:
         label: "{{ item.name }}"
-      when: (frontal_config_file ~ '::' ~ item.name) not in (_routes.json.apps | default([]) | map(attribute='id') | list)
-
-    - name: Lire le YAML de chaque route
-      ansible.builtin.uri:
-        url: "{{ frontal_api }}/api/routes/{{ (frontal_config_file ~ '::' ~ item.name) | urlencode }}/raw"
-        headers: "{{ frontal_headers }}"
-        return_content: true
-      loop: "{{ frontal_routes }}"
-      loop_control:
-        label: "{{ item.name }}"
-      register: _raw
-
-    # YAML exact (règle avec regexp, passthrough, priorité) : le formulaire de
-    # création ne gère qu'un nom d'hôte simple.
-    - name: Écrire la définition exacte des routes (si elle diffère)
-      vars:
-        _route: "{{ item.item }}"
-        _desired:
-          tcp:
-            routers: "{{ {_route.name: {'rule': _route.rule, 'service': _route.name ~ '-service', 'entryPoints': [frontal_entrypoint], 'tls': {'passthrough': true}, 'priority': _route.priority | int}} }}"
-            services: "{{ {_route.name ~ '-service': {'loadBalancer': {'servers': [{'address': cluster_ip ~ ':' ~ (_route.port | string)}]}}} }}"
-      ansible.builtin.uri:
-        url: "{{ frontal_api }}/api/routes/{{ (frontal_config_file ~ '::' ~ _route.name) | urlencode }}/raw"
-        method: POST
-        headers: "{{ frontal_headers }}"
-        body_format: json
-        body:
-          content: "{{ _desired | to_nice_yaml(indent=2) }}"
-          fingerprints: "{{ item.json.fingerprints | default({}) }}"
-      loop: "{{ _raw.results }}"
-      loop_control:
-        label: "{{ item.item.name }}"
-      when: (item.json.raw | from_yaml) != _desired
+      when: not (_up_to_date | bool)
       changed_when: true
 
-    - name: Routes du frontal pour ce cluster
-      ansible.builtin.debug:
-        msg: "{{ frontal_routes | map(attribute='name') | zip(frontal_routes | map(attribute='rule')) | map('join', '  ->  ') | list }}"
+    - name: Relire les routes
+      ansible.builtin.uri:
+        url: "{{ frontal_api }}/api/routes"
+        headers: "{{ frontal_headers }}"
+        return_content: true
+      register: _routes_after
+
+    - name: Vérifier les routes du cluster
+      vars:
+        _r: "{{ _routes_after.json.apps | selectattr('id', 'equalto', frontal_config_file ~ '::' ~ item.name) | first | default({}) }}"
+      ansible.builtin.assert:
+        that:
+          - _r != {}
+          - _r.rule == item.rule
+          - _r.servers == [cluster_ip ~ ':' ~ (item.port | string)]
+          - (_r.tls | default({})).passthrough | default(false)
+        fail_msg: "Route {{ item.name }} absente ou incorrecte sur le frontal : {{ _r }}"
+        success_msg: "{{ item.name }} : {{ item.rule }} -> {{ cluster_ip }}:{{ item.port }} (passthrough, priorité {{ _r.priority }})"
+      loop: "{{ frontal_routes }}"
+      loop_control:
+        label: "{{ item.name }}"
