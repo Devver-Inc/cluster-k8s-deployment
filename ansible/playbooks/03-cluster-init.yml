@@ -111,14 +111,13 @@
                 # SSH dans TLS du git-gateway (IngressRouteTCP HostSNI git.<domaine>,
                 # chart git-gateway du repo kubernetes). Entrypoint séparé de
                 # websecure : pas de délai d'expiration (push longs), sans
-                # toucher à ceux du HTTPS. Public : 443 — le reverse proxy
-                # frontal envoie le SNI git.* vers ce port.
-                # port = écoute dans le pod (8443 est déjà pris par websecure,
-                # qui écoute en 8443 et est exposé en 443) ; exposedPort =
-                # port du Service LoadBalancer.
+                # toucher à ceux du HTTPS. Même port de bout en bout : écoute
+                # du pod = port du Service = cible de la route du frontal
+                # (playbook 07). 8443 est exclu : websecure y écoute dans le pod.
+                # Public : 443 (le frontal route le SNI git.* vers ce port).
                 gitssh:
                   port: 9443
-                  exposedPort: 8443
+                  exposedPort: 9443
                   expose:
                     default: true
                   protocol: TCP

@@ -136,8 +136,16 @@ ansible-playbook -i "$INV" -e cluster_org=<org> -e ansible_ssh_private_key_file=
    `ssh-keygen` dans l'image du runner (`format: base64` pour la clé privée,
    `public_field` pour écrire la clé publique) — jamais régénérée si présente.
 
-   Traefik expose aussi l'entrypoint `gitssh` (port 8443, sans délai
+   Traefik expose aussi l'entrypoint `gitssh` (port 9443, sans délai
    d'expiration) pour le SSH dans TLS du git-gateway (playbook 03).
+
+8. **`07-frontal-routes.yml`** (contrôleur, clusters `<org>-<prod|staging|dev>`)
+   — routes du reverse proxy frontal via l'API de Traefik Manager (clé
+   `devver-infra-deployment/shared/traefik` : `api_url`, `api_key`), en
+   passthrough TLS : `<cluster>-https` (`<domaine>` + `*.<domaine>` →
+   `<IP MetalLB>:443`) et `<cluster>-git` (`git.<domaine>` → `<IP MetalLB>:9443`).
+   Idempotent ; remplace une route manuelle qui visait déjà l'IP du cluster.
+   Supprimées par le job `delete-cluster` au destroy.
 
    Procédure complète côté cluster (saisie console, ordre de déploiement) :
    `Devver-Inc/kubernetes` → `docs/vault-nouveau-cluster.md`.

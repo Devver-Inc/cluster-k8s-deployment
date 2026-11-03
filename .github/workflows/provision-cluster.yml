@@ -586,8 +586,9 @@ jobs:
             ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/05-vault-k8s.yml
             # ArgoCD + Application racine : déploie ensuite toute la stack (sync waves).
             ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/06-argocd-bootstrap.yml
+            ansible-playbook -i "$INV" -e cluster_org="${{ matrix.org }}" -e ansible_ssh_private_key_file="${KEY_PATH}" playbooks/07-frontal-routes.yml
           else
-            echo "Cluster '${{ matrix.org }}' sans suffixe d'env : 05-vault-k8s.yml et 06-argocd-bootstrap.yml ignorés."
+            echo "Cluster '${{ matrix.org }}' sans suffixe d'env : 05-vault-k8s.yml, 06-argocd-bootstrap.yml et 07-frontal-routes.yml ignorés."
           fi
 
   # configure tourne en root dans son conteneur (symlink group_vars,
@@ -840,6 +841,22 @@ jobs:
           TF_VAR_vault_role_id: ${{ secrets.VAULT_CI_ROLE_ID }}
           TF_VAR_vault_secret_id: ${{ secrets.VAULT_CI_SECRET_ID }}
         run: terraform destroy -auto-approve -input=false
+
+      # Routes créées par 07-frontal-routes.yml (Traefik Manager du reverse
+      # proxy frontal). Une route déjà absente (404) n'est pas une erreur.
+      - name: Supprimer les routes du reverse proxy frontal
+        run: |
+          set -euo pipefail
+          org="${{ matrix.org }}"
+          api="$(vault kv get -field=api_url devver-infra-deployment/shared/traefik | sed -E 's#/+$##; s#/api$##')"
+          key="$(vault kv get -field=api_key devver-infra-deployment/shared/traefik)"
+          echo "::add-mask::${key}"
+          for route in "${org}-https" "${org}-git"; do
+            code="$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "X-Api-Key: ${key}" \
+              --data-urlencode "configFile=tcp.yml" "${api}/delete/${route}")"
+            echo "route ${route} : HTTP ${code}"
+            [[ "${code}" =~ ^(2..|404)$ ]] || exit 1
+          done
 
   vault-cleanup:
     needs: [detect, delete-cluster]

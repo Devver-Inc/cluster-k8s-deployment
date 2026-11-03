@@ -1,0 +1,156 @@
+---
+# Routes du reverse proxy frontal (Traefik, géré par Traefik Manager) pour un
+# cluster <org>-<env>, toutes en passthrough TLS (les certificats sont ceux du
+# cluster) :
+#   <cluster>-https : <domaine> + *.<domaine>  -> <IP MetalLB>:443
+#   <cluster>-git   : git.<domaine> (SSH dans TLS des git push)
+#                                              -> <IP MetalLB>:9443 (entrypoint gitssh)
+# Idempotent : crée les routes absentes, réécrit celles qui ont dérivé. Une
+# autre route (créée à la main) qui vise encore l'IP du cluster sur 443/9443
+# est supprimée : ces deux routes la remplacent. La suppression au destroy est
+# faite par le job delete-cluster du workflow.
+# Clé API : devver-infra-deployment/shared/traefik (api_url, api_key).
+#
+# Usage : ansible-playbook -i <inventaire> -e cluster_org=<org>-<env> playbooks/07-frontal-routes.yml
+
+- name: Routes du reverse proxy frontal
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    cl: "{{ hostvars[groups['server'][0]] }}"
+    frontal_config_file: tcp.yml
+    frontal_entrypoint: websecure
+    frontal_gitssh_port: 9443
+    cluster_domain: "{{ cl.cluster_domain }}"
+    cluster_ip: "{{ cl.metallb_ip }}"
+    # Un domaine racine (prod : devver.app) passe APRÈS les clusters en
+    # sous-domaine, sinon son *.devver.app capterait dev.devver.app & co.
+    https_priority: "{{ 10 if (cluster_domain.split('.') | length) <= 2 else 20 }}"
+    frontal_routes:
+      - name: "{{ cluster_org }}-https"
+        host: "{{ cluster_domain }}"
+        rule: "HostSNI(`{{ cluster_domain }}`) || HostSNIRegexp(`^.+\\.{{ cluster_domain | regex_escape }}$`)"
+        port: 443
+        priority: "{{ https_priority | int }}"
+      - name: "{{ cluster_org }}-git"
+        host: "git.{{ cluster_domain }}"
+        rule: "HostSNI(`git.{{ cluster_domain }}`)"
+        port: "{{ frontal_gitssh_port }}"
+        priority: 100
+
+  tasks:
+    - name: Vérifier les paramètres du cluster
+      ansible.builtin.assert:
+        that:
+          - cluster_org is match(cluster_id_regex)
+          - cl.cluster_domain is defined
+          - cl.metallb_ip is defined
+        quiet: true
+
+    - name: Lire la clé API du frontal (shared/traefik)
+      community.hashi_vault.vault_kv2_get:
+        url: "{{ vault_addr }}"
+        auth_method: "{{ vault_auth_method }}"
+        mount_point: "{{ vault_auth_mount_point }}"
+        role_id: "{{ vault_role_id }}"
+        secret_id: "{{ vault_secret_id }}"
+        engine_mount_point: "{{ vault_kv_mount }}"
+        path: shared/traefik
+      register: _frontal
+      no_log: true
+
+    - name: Accès à l'API
+      ansible.builtin.set_fact:
+        frontal_api: "{{ _frontal.secret.api_url | regex_replace('/+$', '') | regex_replace('/api$', '') }}"
+        frontal_headers:
+          X-Api-Key: "{{ _frontal.secret.api_key }}"
+      no_log: true
+
+    - name: Lister les routes existantes
+      ansible.builtin.uri:
+        url: "{{ frontal_api }}/api/routes"
+        headers: "{{ frontal_headers }}"
+        return_content: true
+      register: _routes
+
+    - name: Routes manuelles qui visent encore ce cluster (remplacées)
+      vars:
+        _managed: "{{ frontal_routes | map(attribute='name') | list }}"
+        _targets: ["{{ cluster_ip }}:443", "{{ cluster_ip }}:{{ frontal_gitssh_port }}"]
+      ansible.builtin.set_fact:
+        _legacy: "{{ _legacy | default([]) + [item] }}"
+      loop: "{{ _routes.json.apps | default([]) | selectattr('protocol', 'equalto', 'tcp') | list }}"
+      loop_control:
+        label: "{{ item.id }}"
+      when:
+        - item.name not in _managed
+        - (item.servers | default([]) | intersect(_targets) | length) > 0
+
+    - name: Supprimer les routes manuelles remplacées
+      ansible.builtin.uri:
+        url: "{{ frontal_api }}/delete/{{ item.name | urlencode }}"
+        method: POST
+        headers: "{{ frontal_headers }}"
+        body_format: form-urlencoded
+        body:
+          configFile: "{{ item.configFile | default(frontal_config_file) }}"
+      loop: "{{ _legacy | default([]) }}"
+      loop_control:
+        label: "{{ item.id }} -> {{ item.servers | join(', ') }}"
+
+    - name: Créer les routes absentes
+      ansible.builtin.uri:
+        url: "{{ frontal_api }}/save"
+        method: POST
+        headers: "{{ frontal_headers }}"
+        body_format: form-urlencoded
+        body:
+          serviceName: "{{ item.name }}"
+          subdomain: "{{ item.host }}"
+          protocol: tcp
+          targetIp: "{{ cluster_ip }}"
+          targetPort: "{{ item.port | string }}"
+          configFile: "{{ frontal_config_file }}"
+      loop: "{{ frontal_routes }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: (frontal_config_file ~ '::' ~ item.name) not in (_routes.json.apps | default([]) | map(attribute='id') | list)
+
+    - name: Lire le YAML de chaque route
+      ansible.builtin.uri:
+        url: "{{ frontal_api }}/api/routes/{{ (frontal_config_file ~ '::' ~ item.name) | urlencode }}/raw"
+        headers: "{{ frontal_headers }}"
+        return_content: true
+      loop: "{{ frontal_routes }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: _raw
+
+    # YAML exact (règle avec regexp, passthrough, priorité) : le formulaire de
+    # création ne gère qu'un nom d'hôte simple.
+    - name: Écrire la définition exacte des routes (si elle diffère)
+      vars:
+        _route: "{{ item.item }}"
+        _desired:
+          tcp:
+            routers: "{{ {_route.name: {'rule': _route.rule, 'service': _route.name ~ '-service', 'entryPoints': [frontal_entrypoint], 'tls': {'passthrough': true}, 'priority': _route.priority | int}} }}"
+            services: "{{ {_route.name ~ '-service': {'loadBalancer': {'servers': [{'address': cluster_ip ~ ':' ~ (_route.port | string)}]}}} }}"
+      ansible.builtin.uri:
+        url: "{{ frontal_api }}/api/routes/{{ (frontal_config_file ~ '::' ~ _route.name) | urlencode }}/raw"
+        method: POST
+        headers: "{{ frontal_headers }}"
+        body_format: json
+        body:
+          content: "{{ _desired | to_nice_yaml(indent=2) }}"
+          fingerprints: "{{ item.json.fingerprints | default({}) }}"
+      loop: "{{ _raw.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+      when: (item.json.raw | from_yaml) != _desired
+      changed_when: true
+
+    - name: Routes du frontal pour ce cluster
+      ansible.builtin.debug:
+        msg: "{{ frontal_routes | map(attribute='name') | zip(frontal_routes | map(attribute='rule')) | map('join', '  ->  ') | list }}"
