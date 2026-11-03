@@ -13,3 +13,10 @@ data "vault_kv_secret_v2" "cluster_secrets" {
   mount = "devver-infra-deployment"
   name  = "${var.org}/${var.env}"
 }
+
+# devver-infra-deployment/shared/cloudflare : token API (DNS de la zone
+# base_domain), commun à tous les clusters — enregistrements de dns.tf.
+data "vault_kv_secret_v2" "cloudflare" {
+  mount = "devver-infra-deployment"
+  name  = "shared/cloudflare"
+}

@@ -10,6 +10,10 @@ terraform {
       source  = "hashicorp/vault"
       version = "~> 4.0"
     }
+    cloudflare = {
+      source  = "cloudflare/cloudflare"
+      version = "~> 4.52"
+    }
   }
 
   backend "s3" {}
@@ -39,6 +43,16 @@ provider "proxmox" {
 # noms de VM (le module l'appelle encore "org" par historique).
 locals {
   cluster_id = "${var.org}-${var.env}"
+
+  # Domaine du cluster (règle : voir variable cluster_domain).
+  default_domain = var.org == "devver" ? (
+    var.env == "prod" ? var.base_domain : "${var.env}.${var.base_domain}"
+  ) : "${local.cluster_id}.${var.base_domain}"
+  cluster_domain = var.cluster_domain != "" ? var.cluster_domain : local.default_domain
+}
+
+provider "cloudflare" {
+  api_token = data.vault_kv_secret_v2.cloudflare.data["api_token"]
 }
 
 module "cluster" {
@@ -73,7 +87,7 @@ module "cluster" {
 
   # Passées à Ansible (inventaire) puis à l'Application racine d'ArgoCD.
   cluster_vars = {
-    cluster_domain          = "${local.cluster_id}.${var.base_domain}"
+    cluster_domain          = local.cluster_domain
     nfs_server              = var.nfs_server
     nfs_share               = var.nfs_share
     kubernetes_git_revision = var.kubernetes_git_revision

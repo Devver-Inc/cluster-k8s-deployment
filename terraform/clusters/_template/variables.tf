@@ -26,9 +26,31 @@ variable "env" {
 }
 
 variable "base_domain" {
-  description = "Domaine de base : le cluster est servi sous <org>-<env>.<base_domain> (ex: acme-prod.devver.app)"
+  description = "Zone DNS Cloudflare des clusters (le token partagé n'a accès qu'à elle)"
   type        = string
   default     = "devver.app"
+}
+
+# Domaine du cluster — règle par défaut (locals de providers.tf) :
+#   org devver : prod -> devver.app, staging -> staging.devver.app, dev -> dev.devver.app
+#   autre org  : <org>-<env>.devver.app
+# Source de vérité du domaine pour tout le reste (inventaire, ArgoCD, apps).
+variable "cluster_domain" {
+  description = "Surcharge du domaine du cluster (vide = règle par défaut). Doit être base_domain ou un de ses sous-domaines."
+  type        = string
+  default     = ""
+}
+
+variable "dns_records" {
+  description = "Créer dans Cloudflare le CNAME du domaine du cluster et son wildcard (*.<domaine>) vers dns_target"
+  type        = bool
+  default     = true
+}
+
+variable "dns_target" {
+  description = "Cible des CNAME du cluster : le reverse proxy frontal"
+  type        = string
+  default     = "reverse-proxy.vrhometech.fr"
 }
 
 variable "nfs_server" {

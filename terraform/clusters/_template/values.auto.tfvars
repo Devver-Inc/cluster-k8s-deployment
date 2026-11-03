@@ -20,8 +20,16 @@ tags                     = ["devver", "REPLACE_ME_ORG", "REPLACE_ME_ENV"]
 nfs_server = "192.168.10.5"
 nfs_share  = "/volume1/NFS_K8S_REPLACE_ME"
 
-# DNS du cluster : <org>-<env>.<base_domain> (défaut devver.app).
-# base_domain = "devver.app"
+# Domaine du cluster (calculé, source de vérité pour ArgoCD et les apps) :
+#   org devver : prod -> devver.app, staging -> staging.devver.app, dev -> dev.devver.app
+#   autre org  : <org>-<env>.devver.app
+# Terraform crée dans Cloudflare <domaine> et *.<domaine> en CNAME vers
+# dns_target (supprimés au destroy). Prod : supprimer d'abord l'ancien
+# enregistrement devver.app (sinon la création échoue).
+# base_domain    = "devver.app"                  # zone Cloudflare
+# cluster_domain = ""                            # surcharge (vide = règle)
+# dns_records    = true
+# dns_target     = "reverse-proxy.vrhometech.fr"
 
 # Révision du repo Devver-Inc/kubernetes suivie par ArgoCD (défaut main ;
 # une branche pendant les tests, un tag en prod).

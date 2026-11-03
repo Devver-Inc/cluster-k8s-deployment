@@ -906,3 +906,6 @@ jobs:
           else
             echo "Cluster '${{ matrix.org }}' sans suffixe d'env : rien sous kubernetes-cluster/."
           fi
+          # Fiche du cluster (annuaire, écrite par 06-argocd-bootstrap.yml)
+          vault kv metadata delete "devver-infra-deployment/clusters/${{ matrix.org }}" \
+            && echo "purgé : devver-infra-deployment/clusters/${{ matrix.org }}"

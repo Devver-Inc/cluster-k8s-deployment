@@ -34,9 +34,16 @@ dans Vault : `kubernetes-cluster/<org>/<env>/` (voir
    NAS avec un accès NFS réservé aux IP de ses noeuds (jamais le partage de
    la prod) : lecture/écriture, squash « Aucun mappage », `AUTH_SYS`, mêmes
    permissions de dossier que la prod (règle de propriété du NAS : voir
-   `docs/vault-nouveau-cluster.md` du repo kubernetes, section « Stockage NFS »). Optionnel : `base_domain` (défaut `devver.app` → le cluster est
-   servi sous `<org>-<env>.devver.app`) et `kubernetes_git_revision`
+   `docs/vault-nouveau-cluster.md` du repo kubernetes, section « Stockage NFS »). Optionnel : `kubernetes_git_revision`
    (révision du repo kubernetes suivie par ArgoCD, défaut `main`).
+
+   **Domaine** (calculé, rien à saisir) : org `devver` → `devver.app` (prod),
+   `staging.devver.app`, `dev.devver.app` ; autre org → `<org>-<env>.devver.app`.
+   Surcharge : `cluster_domain` (doit rester dans la zone `base_domain`).
+   Terraform crée dans Cloudflare `<domaine>` et `*.<domaine>` en CNAME vers
+   `dns_target` (`reverse-proxy.vrhometech.fr`, non proxifiés) et les
+   supprime au destroy (`dns_records = false` pour ne pas les gérer).
+   Prod : supprimer d'abord l'ancien enregistrement `devver.app`.
 
 5. Suivre les étapes 1/2/3 du [README racine](../../README.md#mise-en-place)
    (structure Vault → action manuelle → déploiement infra) pour ce cluster.

@@ -314,7 +314,9 @@ pour relancer :
 >    accès réservé aux IP du cluster, squash « Aucun mappage », mêmes
 >    permissions que la prod) ; les secrets communs sont saisis une
 >    fois pour toutes dans `devver-infra-deployment/shared/` (`ghcr`,
->    `github`, `cloudflare`, `argocd-repos`) ;
+>    `github`, `cloudflare`, `argocd-repos`) ; pour la prod (`devver.app`),
+>    l'ancien enregistrement Cloudflare `devver.app` est supprimé (Terraform
+>    crée `<domaine>` et `*.<domaine>` à la création du cluster) ;
 > 1. pousser `terraform/clusters/<org>-<env>/` sur la branche, puis
 >    `workflow_dispatch` (input `org=<org>-<env>`) : `detect` crée la
 >    structure Vault, `prepare-secrets` initialise tous les secrets du

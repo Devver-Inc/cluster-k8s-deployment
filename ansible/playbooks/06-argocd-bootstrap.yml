@@ -220,6 +220,33 @@
           register: _root
           changed_when: "'unchanged' not in _root.stdout"
 
+        # --- 4b. Fiche du cluster -> annuaire Vault -------------------------------
+        # Mêmes champs que la ConfigMap kube-public/devver-cluster-info (chart
+        # racine) : référence commune infra / K8s / devs, jamais saisie à la main.
+        # Purgée par le job vault-cleanup à la suppression du cluster.
+        - name: Écrire la fiche du cluster (devver-infra-deployment/clusters/<org>-<env>)
+          community.hashi_vault.vault_kv2_write:
+            url: "{{ vault_addr }}"
+            auth_method: "{{ vault_auth_method }}"
+            mount_point: "{{ vault_auth_mount_point }}"
+            role_id: "{{ vault_role_id }}"
+            secret_id: "{{ vault_secret_id }}"
+            engine_mount_point: "{{ vault_kv_mount }}"
+            path: "clusters/{{ cluster_org }}"
+            data:
+              clusterId: "{{ cluster_org }}"
+              org: "{{ vault_k8s_org }}"
+              env: "{{ vault_k8s_env }}"
+              domain: "{{ cl.cluster_domain }}"
+              ingressIP: "{{ cl.metallb_ip }}"
+              vaultKvMount: "{{ vault_k8s_kv_mount }}"
+              vaultKvPrefix: "{{ vault_k8s_prefix }}"
+              vaultAuthMount: "k8s-{{ cluster_org }}"
+              storageClass: "nfs-{{ cluster_org }}"
+              gitPathPrefix: "{{ cluster_org }}"
+              gitSshHost: "git.{{ cl.cluster_domain }}"
+              kubernetesRevision: "{{ cl.kubernetes_git_revision | default('main') }}"
+
         # --- 5. Token du backend -> Vault -----------------------------------------
         - name: Lire backend/ dans Vault
           community.hashi_vault.vault_kv2_get:

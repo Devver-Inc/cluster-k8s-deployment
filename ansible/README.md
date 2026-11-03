@@ -124,6 +124,9 @@ ansible-playbook -i "$INV" -e cluster_org=<org> -e ansible_ssh_private_key_file=
      révision `kubernetes_git_revision`) avec les paramètres du cluster
      (domaine, IP d'ingress, partage NFS) : toute la stack est déployée par
      vagues ;
+   - écrit la **fiche du cluster** (`devver-infra-deployment/clusters/<org>-<env>` :
+     org, env, domaine, préfixe Vault, storage class…), mêmes champs que la
+     ConfigMap `kube-public/devver-cluster-info` — purgée par `vault-cleanup` ;
    - génère le token du compte `backend-api` dans Vault
      (`backend/ARGOCD_API_KEY`) dès que l'Application `argocd` l'a créé.
 
