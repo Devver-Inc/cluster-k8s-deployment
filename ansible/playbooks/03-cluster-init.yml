@@ -113,8 +113,11 @@
                 # websecure : pas de délai d'expiration (push longs), sans
                 # toucher à ceux du HTTPS. Public : 443 — le reverse proxy
                 # frontal envoie le SNI git.* vers ce port.
+                # port = écoute dans le pod (8443 est déjà pris par websecure,
+                # qui écoute en 8443 et est exposé en 443) ; exposedPort =
+                # port du Service LoadBalancer.
                 gitssh:
-                  port: 8443
+                  port: 9443
                   exposedPort: 8443
                   expose:
                     default: true
