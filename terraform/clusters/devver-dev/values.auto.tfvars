@@ -18,7 +18,7 @@ tags                     = ["devver", "devver", "dev"]
 # Stockage : partage NFS DÉDIÉ à ce cluster, créé au préalable sur le NAS
 # (accès NFS réservé aux IP des noeuds de ce cluster).
 nfs_server = "192.168.10.5"
-nfs_share  = "/volume1/NFS_K8S_REPLACE_ME"
+nfs_share  = "/volume1/NFS_K8S_DEVVER-DEV"
 
 # Domaine du cluster (calculé, source de vérité pour ArgoCD et les apps) :
 #   org devver : prod -> devver.app, staging -> staging.devver.app, dev -> dev.devver.app
