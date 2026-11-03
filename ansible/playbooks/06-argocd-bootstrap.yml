@@ -247,6 +247,36 @@
               gitSshHost: "git.{{ cl.cluster_domain }}"
               kubernetesRevision: "{{ cl.kubernetes_git_revision | default('main') }}"
 
+        # Échec immédiat si l'Application racine ne trouve pas son chart (ex :
+        # kubernetes_git_revision qui pointe une branche sans argocd/Chart.yaml),
+        # au lieu d'attendre le compte backend-api pendant 15 min.
+        - name: Attendre que l'Application racine charge son chart
+          ansible.builtin.command:
+            argv: [kubectl, -n, argocd, get, application, root, -o, "jsonpath={.status.sync.status}"]
+          register: _root_sync
+          until: _root_sync.stdout in ['Synced', 'OutOfSync']
+          retries: 20
+          delay: 6
+          changed_when: false
+          failed_when: false
+
+        - name: Erreur de l'Application racine
+          when: _root_sync.stdout not in ['Synced', 'OutOfSync']
+          block:
+            - name: Lire l'erreur de l'Application racine
+              ansible.builtin.command:
+                argv: [kubectl, -n, argocd, get, application, root, -o, "jsonpath={.status.conditions[*].message}"]
+              register: _root_err
+              changed_when: false
+
+            - name: Arrêt — l'Application racine ne se synchronise pas
+              ansible.builtin.fail:
+                msg: >-
+                  L'Application racine ne charge pas le chart argocd/ du repo kubernetes
+                  (révision {{ cl.kubernetes_git_revision | default('main') }}) :
+                  {{ _root_err.stdout | default('état ' ~ _root_sync.stdout) }}.
+                  Vérifier kubernetes_git_revision dans terraform/clusters/{{ cluster_org }}/values.auto.tfvars.
+
         # --- 5. Token du backend -> Vault -----------------------------------------
         - name: Lire backend/ dans Vault
           community.hashi_vault.vault_kv2_get:

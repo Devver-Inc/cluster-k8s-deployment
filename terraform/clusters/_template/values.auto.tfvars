@@ -16,7 +16,8 @@ additional_workers_count = 0
 tags                     = ["devver", "REPLACE_ME_ORG", "REPLACE_ME_ENV"]
 
 # Stockage : partage NFS DÉDIÉ à ce cluster, créé au préalable sur le NAS
-# (accès NFS réservé aux IP des noeuds de ce cluster).
+# (accès NFS réservé aux IP des noeuds de ce cluster). Nom EXACT du partage
+# sur le NAS (convention : /volume1/NFS_K8S_<ORG>_<ENV>, en majuscules, "_").
 nfs_server = "192.168.10.5"
 nfs_share  = "/volume1/NFS_K8S_REPLACE_ME"
 
@@ -31,9 +32,10 @@ nfs_share  = "/volume1/NFS_K8S_REPLACE_ME"
 # dns_records    = true
 # dns_target     = "reverse-proxy.vrhometech.fr"
 
-# Révision du repo Devver-Inc/kubernetes suivie par ArgoCD (défaut main ;
-# une branche pendant les tests, un tag en prod).
-# kubernetes_git_revision = "feat/vault-eso"
+# Révision du repo Devver-Inc/kubernetes suivie par ArgoCD : main (ou un tag)
+# en usage normal ; pendant un test, la branche testée (elle doit contenir le
+# chart racine argocd/ — sinon ArgoCD ne déploie rien).
+kubernetes_git_revision = "main"
 
 proxmox_node  = "PROXMOX-PVE1"
 datastore_id  = "SSD-PVE-DATA"

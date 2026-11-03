@@ -158,6 +158,9 @@
   hosts: server:!server[0]
   gather_facts: false
   become: true
+  # Un par un : deux serveurs qui rejoignent etcd en même temps se gênent
+  # (rke2-server en timeout au démarrage, constaté sur devver-dev).
+  serial: 1
   vars:
     rke2_join_token: "{{ hostvars[groups['server'][0]]['rke2_join_token'] }}"
 
