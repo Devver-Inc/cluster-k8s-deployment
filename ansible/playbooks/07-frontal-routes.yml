@@ -68,6 +68,16 @@
           X-Api-Key: "{{ _frontal.secret.api_key }}"
       no_log: true
 
+    # Nom de l'API résolu seulement par le DNS local : entrée fixe (api_ip,
+    # Vault) dans le /etc/hosts du conteneur du runner, temporaire. Le
+    # certificat HTTPS reste vérifié sur le nom.
+    - name: Résolution fixe du nom de l'API (api_ip)
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        line: "{{ _frontal.secret.api_ip }} {{ frontal_api | urlsplit('hostname') }}"
+        unsafe_writes: true   # /etc/hosts d'un conteneur Docker : fichier monté, pas de renommage possible
+      when: _frontal.secret.api_ip | default('') | length > 0
+
     - name: Lister les routes existantes
       ansible.builtin.uri:
         url: "{{ frontal_api }}/api/routes"

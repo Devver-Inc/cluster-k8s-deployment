@@ -850,9 +850,13 @@ jobs:
           org="${{ matrix.org }}"
           api="$(vault kv get -field=api_url devver-infra-deployment/shared/traefik | sed -E 's#/+$##; s#/api$##')"
           key="$(vault kv get -field=api_key devver-infra-deployment/shared/traefik)"
+          ip="$(vault kv get -field=api_ip devver-infra-deployment/shared/traefik 2>/dev/null || true)"
           echo "::add-mask::${key}"
+          # Nom résolu seulement par le DNS local : IP fixe (api_ip) si fournie.
+          host="$(echo "${api}" | sed -E 's#^https?://([^/:]+).*#\1#')"
+          resolve=(); [[ -n "${ip}" ]] && resolve=(--resolve "${host}:443:${ip}")
           for route in "${org}-https" "${org}-git"; do
-            code="$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "X-Api-Key: ${key}" \
+            code="$(curl -s -o /dev/null -w '%{http_code}' "${resolve[@]}" -X POST -H "X-Api-Key: ${key}" \
               --data-urlencode "configFile=tcp.yml" "${api}/delete/${route}")"
             echo "route ${route} : HTTP ${code}"
             [[ "${code}" =~ ^(2..|404)$ ]] || exit 1
