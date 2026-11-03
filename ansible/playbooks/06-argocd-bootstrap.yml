@@ -284,6 +284,15 @@
               delay: "{{ argocd_account_delay }}"
               changed_when: false
 
+            # La même synchro remplace ensuite argocd-server (Argo se gère
+            # lui-même) : générer le token sur l'ancien pod échoue (constaté sur
+            # devver-dev). Attendre la fin d'un déploiement en cours ; s'il
+            # démarre après ce contrôle, les réessais du token le couvrent.
+            - name: Attendre le redéploiement d'argocd-server par Argo
+              ansible.builtin.command:
+                argv: [kubectl, -n, argocd, rollout, status, deploy/argocd-server, --timeout=300s]
+              changed_when: false
+
             - name: Relire le mot de passe admin
               community.hashi_vault.vault_kv2_get:
                 url: "{{ vault_addr }}"
@@ -316,6 +325,10 @@
                     || argocd login localhost:8080 --insecure --username admin --password "$ADMIN_PW" >/dev/null; }
                     && argocd account generate-token --account backend-api
               register: _token
+              # Réessais : un redémarrage tardif d'argocd-server reste possible.
+              until: _token.rc == 0
+              retries: 10
+              delay: 15
               changed_when: true
               no_log: true
 
