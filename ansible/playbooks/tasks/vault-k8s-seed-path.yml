@@ -1,7 +1,7 @@
 ---
 # Initialise UN chemin kubernetes-cluster/<org>/<env>/<seed.path> :
 # lit l'existant, calcule la valeur des clés ABSENTES selon leur classe
-# (generate / static / shared / manual-pre / manual-post / auto-post, voir
+# (generate / static / shared / sshkey / manual-pre / manual-post / auto-post, voir
 # vars/vault-k8s-secrets.yml), écrit le tout fusionné — l'existant gagne,
 # sauf une clé "shared" encore à CHANGEME, recopiée dès que la valeur commune
 # existe dans devver-infra-deployment/shared/<seed.path>.
@@ -51,6 +51,41 @@
     _seed_defaults: {}
   no_log: true
 
+# Mode sshkey : paire ed25519 générée par ssh-keygen (image du runner) dans
+# un dossier temporaire supprimé aussitôt. format: base64 -> clé privée en
+# base64 ; public_field -> clé publique écrite dans ce champ.
+- name: "{{ seed.path }} — générer les clés SSH absentes"
+  ansible.builtin.shell: |
+    set -eu
+    d=$(mktemp -d)
+    trap 'rm -rf "$d"' EXIT
+    ssh-keygen -q -t ed25519 -N '' -C "{{ cluster_org }}-{{ seed.path }}-{{ field.name }}" -f "$d/key"
+    cat "$d/key"
+    echo '---PUBLIC---'
+    cat "$d/key.pub"
+  loop: "{{ seed.fields | selectattr('mode', 'equalto', 'sshkey') | list }}"
+  loop_control:
+    loop_var: field
+    label: "{{ field.name }} (sshkey)"
+  when: field.name not in _seed_current
+  register: _seed_sshkeys
+  changed_when: true
+  no_log: true
+
+- name: "{{ seed.path }} — valeurs des clés SSH générées"
+  vars:
+    _priv: "{{ item.stdout.split('---PUBLIC---')[0] | trim ~ '\n' }}"
+    _pub: "{{ item.stdout.split('---PUBLIC---')[1] | trim }}"
+  ansible.builtin.set_fact:
+    _seed_defaults: >-
+      {{ _seed_defaults
+         | combine({item.field.name: (_priv | b64encode) if item.field.format | default('') == 'base64' else _priv})
+         | combine({item.field.public_field: _pub} if item.field.public_field is defined else {}) }}
+  loop: "{{ _seed_sshkeys.results | default([]) | rejectattr('skipped', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.field.name }}"
+  no_log: true
+
 # Inline if Jinja : seule la branche retenue est évaluée — le lookup password
 # n'est appelé que pour les clés en mode generate. Une valeur commune vide ou
 # à CHANGEME n'est pas copiée (reste CHANGEME, donc bloquante).
@@ -74,8 +109,9 @@
     loop_var: field
     label: "{{ field.name }} ({{ field.mode }})"
   when: >-
-    field.name not in _seed_current
-    or (field.mode == 'shared' and _seed_current[field.name] == 'CHANGEME')
+    field.mode != 'sshkey'
+    and (field.name not in _seed_current
+         or (field.mode == 'shared' and _seed_current[field.name] == 'CHANGEME'))
   no_log: true
 
 # _seed_current | combine(_seed_defaults) : _seed_defaults ne contient que les

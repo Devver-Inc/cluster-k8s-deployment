@@ -176,6 +176,20 @@
                 cmd: kubectl -n argocd delete secret argocd-initial-admin-secret
 
         # --- 4. Application racine -------------------------------------------------
+        # Clé publique du gateway (générée par 05-vault-seed, mode sshkey) :
+        # chaque deploy-agent n'accepte qu'elle sur son port 22.
+        - name: Lire la clé publique du git-gateway (git-gateway/upstreamPublicKey)
+          community.hashi_vault.vault_kv2_get:
+            url: "{{ vault_addr }}"
+            auth_method: "{{ vault_auth_method }}"
+            mount_point: "{{ vault_auth_mount_point }}"
+            role_id: "{{ vault_role_id }}"
+            secret_id: "{{ vault_secret_id }}"
+            engine_mount_point: "{{ vault_k8s_kv_mount }}"
+            path: "{{ vault_k8s_prefix }}/git-gateway"
+          register: _git_gateway_vault
+          no_log: true
+
         - name: Application racine (chart argocd/ du repo kubernetes)
           ansible.builtin.command:
             cmd: kubectl apply -f -
@@ -207,6 +221,8 @@
                       git:
                         kubernetes:
                           revision: "{{ cl.kubernetes_git_revision | default('main') }}"
+                      gitGateway:
+                        publicKey: "{{ _git_gateway_vault.secret.upstreamPublicKey }}"
                 syncPolicy:
                   automated:
                     prune: true

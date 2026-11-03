@@ -108,6 +108,21 @@
                 annotations:
                   metallb.io/loadBalancerIPs: "{{ metallb_ip }}"
               ports:
+                # SSH dans TLS du git-gateway (IngressRouteTCP HostSNI git.<domaine>,
+                # chart git-gateway du repo kubernetes). Entrypoint séparé de
+                # websecure : pas de délai d'expiration (push longs), sans
+                # toucher à ceux du HTTPS. Public : 443 — le reverse proxy
+                # frontal envoie le SNI git.* vers ce port.
+                gitssh:
+                  port: 8443
+                  exposedPort: 8443
+                  expose:
+                    default: true
+                  protocol: TCP
+                  transport:
+                    respondingTimeouts:
+                      readTimeout: 0
+                      writeTimeout: 0
                 websecure:
                   # En-têtes de sécurité sur toutes les routes HTTPS (repris de
                   # kubernetes/traefik/traefik-values.yaml). Le Middleware

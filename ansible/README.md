@@ -128,7 +128,16 @@ ansible-playbook -i "$INV" -e cluster_org=<org> -e ansible_ssh_private_key_file=
      org, env, domaine, préfixe Vault, storage class…), mêmes champs que la
      ConfigMap `kube-public/devver-cluster-info` — purgée par `vault-cleanup` ;
    - génère le token du compte `backend-api` dans Vault
-     (`backend/ARGOCD_API_KEY`) dès que l'Application `argocd` l'a créé.
+     (`backend/ARGOCD_API_KEY`) dès que l'Application `argocd` l'a créé ;
+   - passe à l'Application racine la clé publique du git-gateway
+     (`git-gateway/upstreamPublicKey` → `gitGateway.publicKey`).
+
+   Secrets générés en mode `sshkey` (05-vault-seed) : paire ed25519 créée par
+   `ssh-keygen` dans l'image du runner (`format: base64` pour la clé privée,
+   `public_field` pour écrire la clé publique) — jamais régénérée si présente.
+
+   Traefik expose aussi l'entrypoint `gitssh` (port 8443, sans délai
+   d'expiration) pour le SSH dans TLS du git-gateway (playbook 03).
 
    Procédure complète côté cluster (saisie console, ordre de déploiement) :
    `Devver-Inc/kubernetes` → `docs/vault-nouveau-cluster.md`.
