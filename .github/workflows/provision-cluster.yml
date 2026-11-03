@@ -71,7 +71,11 @@ name: "Provision cluster"
 # Toujours uniquement create-cluster par ce chemin, jamais delete/add/remove.
 on:
   push:
-    branches: [main]
+    # feat/vault-eso : TEMPORAIRE, pour tester sur le cluster de test les
+    # mêmes déclenchements que sur main. À retirer à la fusion sur main.
+    # Attention : detect compare Vault au contenu de la branche poussée — un
+    # cluster présent dans Vault mais absent de cette branche est DÉTRUIT.
+    branches: [main, feat/vault-eso]
     paths:
       - "terraform/clusters/**"
       - "terraform/scripts/**"
