@@ -321,7 +321,9 @@ jobs:
   # --- Création cluster --------------------------------------------------
 
   create-cluster:
-    needs: [detect, prepare-secrets]
+    # Attend le nettoyage : prepare-secrets (conteneur, root) laisse le
+    # workspace partagé à root, le checkout échouerait (Permission denied).
+    needs: [detect, prepare-secrets, prepare-secrets-cleanup-workspace]
     # ready est calculé par prepare-secrets (secrets VM + secrets applicatifs
     # bloquants saisis) : sinon le run s'arrête ici, en vert, avec un warning.
     if: needs.detect.outputs.orgs_create != '[]' && needs.prepare-secrets.outputs.ready == 'true'
