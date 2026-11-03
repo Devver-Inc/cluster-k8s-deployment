@@ -106,6 +106,9 @@
         body_format: form-urlencoded
         body:
           configFile: "{{ item.configFile | default(frontal_config_file) }}"
+        # /delete et /save sont des formulaires : succès = redirection 302 vers /
+        follow_redirects: none
+        status_code: [200, 302]
       loop: "{{ _legacy | default([]) }}"
       loop_control:
         label: "{{ item.id }} -> {{ item.servers | join(', ') }}"
@@ -123,6 +126,8 @@
           targetIp: "{{ cluster_ip }}"
           targetPort: "{{ item.port | string }}"
           configFile: "{{ frontal_config_file }}"
+        follow_redirects: none
+        status_code: [200, 302]
       loop: "{{ frontal_routes }}"
       loop_control:
         label: "{{ item.name }}"

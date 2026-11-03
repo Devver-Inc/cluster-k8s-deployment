@@ -859,7 +859,8 @@ jobs:
             code="$(curl -s -o /dev/null -w '%{http_code}' "${resolve[@]}" -X POST -H "X-Api-Key: ${key}" \
               --data-urlencode "configFile=tcp.yml" "${api}/delete/${route}")"
             echo "route ${route} : HTTP ${code}"
-            [[ "${code}" =~ ^(2..|404)$ ]] || exit 1
+            # /delete est un formulaire : succès = 302 (redirection vers /)
+            [[ "${code}" =~ ^(2..|302|404)$ ]] || exit 1
           done
 
   vault-cleanup:
