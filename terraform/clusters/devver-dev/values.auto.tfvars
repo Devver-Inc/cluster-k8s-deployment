@@ -41,8 +41,8 @@ template_name = "rocky9-cloud-template"
 
 # Ressources personnalisables indépendamment par org/environnement (valeurs par
 # défaut dans module/variables.tf si omises ici) :
-master_cpu_cores = 4
-master_memory    = 4096
+master_cpu_cores = 2
+master_memory    = 2048
 master_disk_size = 40
 
 # worker_cpu_cores       = 4
