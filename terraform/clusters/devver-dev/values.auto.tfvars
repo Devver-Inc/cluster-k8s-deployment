@@ -33,7 +33,7 @@ nfs_share  = "/volume1/NFS_K8S_DEVVER_DEV"
 
 # Révision du repo Devver-Inc/kubernetes suivie par ArgoCD (défaut main ;
 # une branche pendant les tests, un tag en prod).
-kubernetes_git_revision = "feat/git-gateway"
+kubernetes_git_revision = "main"
 
 proxmox_node  = "PROXMOX-PVE1"
 datastore_id  = "SSD-PVE-DATA"

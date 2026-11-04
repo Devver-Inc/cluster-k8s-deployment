@@ -314,9 +314,10 @@ pour relancer :
 >    accès réservé aux IP du cluster, squash « Aucun mappage », mêmes
 >    permissions que la prod) ; les secrets communs sont saisis une
 >    fois pour toutes dans `devver-infra-deployment/shared/` (`ghcr`,
->    `github`, `cloudflare`, `argocd-repos`) ; pour la prod (`devver.app`),
+>    `github`, `cloudflare`, `argocd-repos`, `traefik`) ; pour la prod (`devver.app`),
 >    l'ancien enregistrement Cloudflare `devver.app` est supprimé (Terraform
 >    crée `<domaine>` et `*.<domaine>` à la création du cluster) ;
+>    reverse proxy frontal (routes créées par le playbook 07, voir plus bas) ;
 > 1. pousser `terraform/clusters/<org>-<env>/` sur la branche, puis
 >    `workflow_dispatch` (input `org=<org>-<env>`) : `detect` crée la
 >    structure Vault, `prepare-secrets` initialise tous les secrets du
@@ -371,3 +372,38 @@ cette org uniquement.
 > `main`. Vérifier que les Actions du repo ont la permission d'écriture
 > (Settings > Actions > General > Workflow permissions > **Read and write
 > permissions**), sinon ces steps échouent avec une erreur d'autorisation.
+
+
+## Reverse proxy frontal (Traefik Manager)
+
+À chaque création ou relance (job `configure`), le playbook
+`ansible/playbooks/07-frontal-routes.yml` crée ou corrige sur le Traefik
+frontal, par l'API de Traefik Manager, deux routes TCP en passthrough TLS :
+
+| Route | Règle (SNI) | Cible | Priorité |
+|---|---|---|---|
+| `<cluster>-https` | `<domaine>` + `*.<domaine>` | `<IP MetalLB>:443` | 20 (10 pour un domaine racine comme `devver.app`) |
+| `<cluster>-git` | `git.<domaine>` | `<IP MetalLB>:9443` | 100 |
+
+Une route créée à la main qui vise déjà l'IP du cluster (443 ou 9443) est
+remplacée. Le job `delete-cluster` supprime les deux routes au destroy.
+
+**Prérequis, une seule fois :**
+- Vault `devver-infra-deployment/shared/traefik` :
+
+  | Clé | Contenu |
+  |---|---|
+  | `api_url` | `https://lb-traefik.vrhometech.fr/api` |
+  | `api_key` | clé API de Traefik Manager (Settings → Authentication → API Key) |
+  | `api_ip` | IP de Traefik Manager (`192.168.20.8`) : le nom n'existe que sur le DNS local, la pipeline l'ajoute au `/etc/hosts` du conteneur |
+
+- Pare-feu entre réseaux :
+  - runner → Traefik Manager (`192.168.20.8`), TCP 443 ;
+  - Traefik frontal → plage MetalLB des clusters (`192.168.45.100-190`), TCP **443 et 9443**.
+- La box ne redirige que le **443** vers le frontal : rien d'autre à ouvrir.
+
+**API de Traefik Manager** (pour la maintenance du playbook) : en-tête
+`X-Api-Key` ; les formulaires `/save` et `/delete/<nom>` répondent en JSON avec
+`X-Requested-With: fetch` (sans lui, un refus n'est qu'une redirection 302) ;
+champs répétés `entryPoints` / `targetIp` / `targetPort` : 2e valeur = TCP ;
+`tcpRule`, `tlsPassthrough=true` et `backendsJsonTcp` (cible + priorité).
