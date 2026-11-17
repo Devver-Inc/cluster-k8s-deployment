@@ -54,9 +54,13 @@
         - 10.42.0.0/16      # pods (cluster-cidr RKE2 par défaut)
         - 10.43.0.0/16      # services (service-cidr RKE2 par défaut)
 
+    # Sur Rocky, get.rke2.io installe par RPM (binaire dans /usr/bin) ; par
+    # archive, c'est /usr/local/bin. Ne tester que /usr/local/bin relançait
+    # l'installeur à chaque passage de la pipeline.
     - name: Vérifier si RKE2 est déjà installé
       ansible.builtin.stat:
-        path: /usr/local/bin/rke2
+        path: "{{ item }}"
+      loop: [/usr/bin/rke2, /usr/local/bin/rke2]
       register: rke2_binary
 
     - name: Télécharger et installer RKE2 ({{ rke2_install_type }})
@@ -65,6 +69,4 @@
         INSTALL_RKE2_VERSION={{ rke2_version }} \
         INSTALL_RKE2_TYPE={{ rke2_install_type }} \
         sh -
-      args:
-        creates: /usr/local/bin/rke2
-      when: not rke2_binary.stat.exists
+      when: not (rke2_binary.results | selectattr('stat.exists') | list)
