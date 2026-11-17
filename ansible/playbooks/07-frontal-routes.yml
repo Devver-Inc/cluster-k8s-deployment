@@ -5,6 +5,9 @@
 #   <cluster>-https : <domaine> + *.<domaine>  -> <IP MetalLB>:443
 #   <cluster>-git   : git.<domaine> (SSH dans TLS des git push)
 #                                              -> <IP MetalLB>:9443 (entrypoint gitssh)
+# La route <cluster>-https envoie le PROXY protocol v2 au cluster (IP réelle
+# des visiteurs) : websecure le lit depuis frontal_source_ips (playbook 03, qui
+# attend que Traefik l'ait pris en compte avant que ce playbook ne l'active).
 # Idempotent : crée les routes absentes, réécrit celles qui ont dérivé. Une
 # autre route (créée à la main) qui vise encore l'IP du cluster sur 443/9443
 # est supprimée : ces deux routes la remplacent. La suppression au destroy est
@@ -153,6 +156,43 @@
       when: not (_up_to_date | bool)
       changed_when: true
 
+    # Le formulaire /save ne gère pas les serversTransports : le transport
+    # PROXY v2 passe par le YAML brut de la route (/api/routes/<id>/raw, comme
+    # l'éditeur YAML de Traefik Manager). Un /save ultérieur le conserve.
+    # Pas sur <cluster>-git : l'entrypoint gitssh ne lit pas le PROXY protocol.
+    - name: Lire le YAML de la route HTTPS
+      ansible.builtin.uri:
+        url: "{{ frontal_api }}/api/routes/{{ (frontal_config_file ~ '::' ~ cluster_org ~ '-https') | urlencode }}/raw"
+        headers: "{{ frontal_headers }}"
+        return_content: true
+      register: _https_raw
+
+    - name: PROXY protocol v2 vers le cluster (route HTTPS)
+      vars:
+        _name: "{{ cluster_org }}-https"
+        _transport: "{{ cluster_org }}-proxy-protocol"
+        _doc: "{{ _https_raw.json.raw | from_yaml }}"
+        _svc: "{{ _doc.tcp.routers[_name].service }}"
+        _wanted: >-
+          {{ _doc | combine({'tcp': {
+               'services': {_svc: {'loadBalancer': {'serversTransport': _transport}}},
+               'serversTransports': {_transport: {'proxyProtocol': {'version': 2}}}}}, recursive=true) }}
+      ansible.builtin.uri:
+        url: "{{ frontal_api }}/api/routes/{{ (frontal_config_file ~ '::' ~ _name) | urlencode }}/raw"
+        method: POST
+        headers: "{{ frontal_headers | combine({'X-Requested-With': 'fetch'}) }}"
+        body_format: json
+        body:
+          content: "{{ _wanted | to_nice_yaml(indent=2) }}"
+          applyShared: false
+          applyRename: false
+          fingerprints: "{{ _https_raw.json.fingerprints }}"
+        status_code: [200]
+      register: _pp_saved
+      failed_when: _pp_saved.status != 200 or not (_pp_saved.json.ok | default(false))
+      when: _wanted != _doc
+      changed_when: true
+
     - name: Relire les routes
       ansible.builtin.uri:
         url: "{{ frontal_api }}/api/routes"
@@ -174,3 +214,22 @@
       loop: "{{ frontal_routes }}"
       loop_control:
         label: "{{ item.name }}"
+
+    - name: Relire le YAML de la route HTTPS
+      ansible.builtin.uri:
+        url: "{{ frontal_api }}/api/routes/{{ (frontal_config_file ~ '::' ~ cluster_org ~ '-https') | urlencode }}/raw"
+        headers: "{{ frontal_headers }}"
+        return_content: true
+      register: _https_raw_after
+
+    - name: Vérifier le PROXY protocol de la route HTTPS
+      vars:
+        _doc: "{{ _https_raw_after.json.raw | from_yaml }}"
+        _svc: "{{ _doc.tcp.routers[cluster_org ~ '-https'].service }}"
+        _transport: "{{ _doc.tcp.services[_svc].loadBalancer.serversTransport | default('') }}"
+      ansible.builtin.assert:
+        that:
+          - _transport == cluster_org ~ '-proxy-protocol'
+          - (_doc.tcp.serversTransports | default({}))[_transport].proxyProtocol.version | default(0) | int == 2
+        fail_msg: "Route {{ cluster_org }}-https sans PROXY protocol v2 sur le frontal : {{ _https_raw_after.json.raw }}"
+        success_msg: "{{ cluster_org }}-https : PROXY protocol v2 vers {{ cluster_ip }}:443"

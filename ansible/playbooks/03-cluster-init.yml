@@ -105,6 +105,11 @@
                 # qui écrase service.type : il faut le surcharger aussi.
                 spec:
                   type: LoadBalancer
+                  # IP source préservée (pas de SNAT de kube-proxy) : websecure
+                  # voit l'adresse du frontal et peut lui faire confiance pour
+                  # le PROXY protocol. Traefik tourne en DaemonSet : le nœud qui
+                  # annonce l'IP MetalLB a toujours un pod local.
+                  externalTrafficPolicy: Local
                 annotations:
                   metallb.io/loadBalancerIPs: "{{ metallb_ip }}"
               ports:
@@ -136,6 +141,11 @@
                   http:
                     middlewares:
                       - kube-system-security-headers@kubernetescrd
+                  # IP réelle du client : en-tête PROXY v2 envoyé par le frontal
+                  # (playbook 07), lu seulement depuis frontal_source_ips. Les
+                  # connexions sans en-tête (réseau local) passent toujours.
+                  proxyProtocol:
+                    trustedIPs: {{ frontal_source_ips | to_json }}
 
     - name: "Écrire la config RKE2 du premier master (pas de champ server, c'est lui le point d'entrée)"
       ansible.builtin.copy:
@@ -282,6 +292,24 @@
         path: "{{ vault_cluster_secret_path }}"
         data: "{{ cluster_secrets_updated }}"
       no_log: true
+
+    # Le playbook 07 active le PROXY protocol sur la route du frontal : il ne
+    # faut le faire qu'une fois websecure capable de le lire (sinon plus aucun
+    # site HTTPS du cluster ne répond). Couvre aussi un cluster existant, où
+    # RKE2 réapplique le HelmChartConfig modifié (redémarrage de Traefik).
+    - name: Attendre Traefik avec le PROXY protocol sur websecure
+      ansible.builtin.shell: |
+        set -o pipefail
+        k="/var/lib/rancher/rke2/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml -n kube-system"
+        $k get ds rke2-traefik -o jsonpath='{.spec.template.spec.containers[0].args}' | grep -q 'websecure.proxyProtocol.trustedIPs'
+        $k rollout status ds/rke2-traefik --timeout=60s
+      args:
+        executable: /bin/bash
+      register: _traefik_pp
+      until: _traefik_pp.rc == 0
+      retries: 30
+      delay: 10
+      changed_when: false
 
     - name: Cluster RKE2 initialisé
       ansible.builtin.debug:

@@ -30,6 +30,15 @@ rke2_version: "v1.36.5+rke2r1"
 # (metallb_ip, inventaire) et la donne au Service LoadBalancer de Traefik.
 metallb_chart_version: "0.16.1"
 
+# IP réelle des visiteurs : le reverse proxy frontal (Traefik, playbook 07)
+# envoie le PROXY protocol v2 sur la route <cluster>-https, et l'entrypoint
+# websecure du cluster ne le lit que depuis ces adresses (03-cluster-init.yml).
+# Adresse source du Traefik frontal vue par le cluster (Service Traefik en
+# externalTrafficPolicy: Local, donc sans SNAT). Un en-tête PROXY venant d'une
+# autre adresse est ignoré (la connexion passe, l'IP vue est la source TCP).
+frontal_source_ips:
+  - 192.168.20.8/32
+
 # Chart argo-cd installé au bootstrap (06-argocd-bootstrap.yml) — garder
 # identique à versions.argocd de Devver-Inc/kubernetes (argocd/values.yaml),
 # l'Application "argocd" reprenant ensuite la même release.
