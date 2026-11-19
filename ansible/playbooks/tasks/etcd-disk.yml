@@ -71,6 +71,25 @@
             name: rke2-server
             state: stopped
 
+        # systemctl stop rke2-server laisse tourner les conteneurs (KillMode
+        # process) : etcd continuerait d'écrire dans l'ANCIEN répertoire
+        # (descripteurs ouverts, même après le mv) et la copie serait une
+        # image figée — perte de toutes les écritures jusqu'au reboot suivant
+        # (constaté sur sg-vr-dev). rke2-killall.sh arrête tous les conteneurs.
+        - name: etcd-disk | Arrêter tous les conteneurs RKE2 (rke2-killall.sh)
+          ansible.builtin.shell: |
+            for s in /usr/bin/rke2-killall.sh /usr/local/bin/rke2-killall.sh; do
+              [ -x "$s" ] && exec "$s"
+            done
+            echo "rke2-killall.sh introuvable" >&2; exit 1
+          changed_when: true
+
+        - name: etcd-disk | etcd doit être arrêté avant la copie
+          ansible.builtin.command: pgrep -x etcd
+          register: _etcd_pgrep
+          changed_when: false
+          failed_when: _etcd_pgrep.rc == 0
+
         - name: etcd-disk | Copier {{ etcd_db_dir }} (cp -a, attributs et contextes conservés)
           ansible.builtin.command: cp -a {{ etcd_db_dir }}/. /mnt/etcd-disk/
           changed_when: true
