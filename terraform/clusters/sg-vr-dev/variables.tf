@@ -126,6 +126,24 @@ variable "master_disk_size" {
   default = 40
 }
 
+variable "master_os_datastore_id" {
+  description = "Datastore du disque système des masters (vide = datastore_id). Le changer déplace le disque, sans recréer la VM."
+  type        = string
+  default     = ""
+}
+
+variable "etcd_disk_size" {
+  description = "Disque dédié à etcd sur chaque master (Go). 0 = désactivé."
+  type        = number
+  default     = 0
+}
+
+variable "etcd_disk_datastore_id" {
+  description = "Datastore du disque etcd (vide = même que le disque système)."
+  type        = string
+  default     = ""
+}
+
 variable "worker_cpu_cores" {
   type    = number
   default = 4

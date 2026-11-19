@@ -56,3 +56,10 @@ master_memory    = 10240
 # worker_memory          = 6144
 # worker_disk_size       = 40
 # worker_extra_disk_size = 150
+
+# Test disque etcd dédié (branche victor/etcd-disk).
+# Le disque système a été déplacé à la main sur nfs-pve-prod (Proxmox) : on
+# l'écrit ici pour que Terraform ne le ramène pas sur SSD-PVE-DATA.
+master_os_datastore_id = "nfs-pve-prod"
+etcd_disk_size         = 10
+etcd_disk_datastore_id = "" # test 1 : même datastore que le système

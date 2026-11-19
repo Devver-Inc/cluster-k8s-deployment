@@ -98,6 +98,29 @@ variable "master_disk_size" {
   default     = 40
 }
 
+variable "master_os_datastore_id" {
+  description = "Datastore du disque système (scsi0) des masters. Vide = datastore_id. Le changer DÉPLACE le disque (pas de recréation de VM) ; le clone et le cloud-init restent sur datastore_id."
+  type        = string
+  default     = ""
+}
+
+variable "etcd_disk_size" {
+  description = "Taille (Go) d'un disque dédié à etcd (scsi1) sur chaque master, monté sur /var/lib/rancher/rke2/server/db. 0 = pas de disque dédié (etcd sur le disque système)."
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = var.etcd_disk_size == 0 || var.etcd_disk_size >= 5
+    error_message = "etcd_disk_size : 0 (désactivé) ou >= 5 Go."
+  }
+}
+
+variable "etcd_disk_datastore_id" {
+  description = "Datastore du disque etcd. Vide = même datastore que le disque système."
+  type        = string
+  default     = ""
+}
+
 variable "worker_cpu_cores" {
   description = "Nombre de coeurs CPU pour les noeuds worker-only"
   type        = number

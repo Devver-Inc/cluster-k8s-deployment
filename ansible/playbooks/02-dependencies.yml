@@ -70,3 +70,16 @@
         INSTALL_RKE2_TYPE={{ rke2_install_type }} \
         sh -
       when: not (rke2_binary.results | selectattr('stat.exists') | list)
+
+# Disque dédié à etcd (masters, si etcd_disk_size > 0 dans Terraform -> etcd_disk
+# dans l'inventaire). Un nœud à la fois : sur un cluster en service, la migration
+# arrête rke2-server le temps de copier etcd (quorum gardé en HA).
+- name: Disque dédié à etcd
+  hosts: server
+  gather_facts: false
+  become: true
+  serial: 1
+  tasks:
+    - name: Disque etcd
+      ansible.builtin.include_tasks: tasks/etcd-disk.yml
+      when: etcd_disk | default('false') | bool

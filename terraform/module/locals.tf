@@ -34,6 +34,9 @@ locals {
 
   all_nodes = merge(local.mixed_nodes, local.worker_only_nodes)
 
+  master_os_datastore = var.master_os_datastore_id != "" ? var.master_os_datastore_id : var.datastore_id
+  etcd_datastore      = var.etcd_disk_datastore_id != "" ? var.etcd_disk_datastore_id : local.master_os_datastore
+
   # IP MetalLB = dernière IP de la sous-plage dérivée (jamais assignée à un noeud).
   metallb_ip      = "${var.network_base}.${local.subnet_end}"
   last_node_octet = local.subnet_start + local.total_nodes - 1
