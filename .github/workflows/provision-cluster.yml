@@ -357,14 +357,39 @@ jobs:
         env:
           TF_VAR_vault_role_id: ${{ secrets.VAULT_CI_ROLE_ID }}
           TF_VAR_vault_secret_id: ${{ secrets.VAULT_CI_SECRET_ID }}
-        run: terraform plan -input=false
+        run: terraform plan -input=false -out=tfplan
 
+      # Garde-fou : ce job relance aussi un cluster EXISTANT (workflow_dispatch,
+      # ex. changement de RAM/CPU = mise à jour sur place). Aucune VM existante
+      # ne doit être supprimée ni recréée (remplacement = delete + create) : le
+      # job s'arrête AVANT l'apply. Le plan appliqué est celui vérifié ici.
+      - name: Vérifier le plan (aucune VM supprimée ou recréée)
+        working-directory: terraform/clusters/${{ matrix.org }}
+        run: |
+          set -euo pipefail
+          terraform show -json tfplan > tfplan.json
+          echo "Changements des VM :"
+          jq -r '.resource_changes[]? | select(.type == "proxmox_virtual_environment_vm")
+            | select(.change.actions != ["no-op"])
+            | "  \(.address) : \(.change.actions | join("+"))"
+              + (if (.change.before.memory // null) != null and (.change.after.memory // null) != null
+                   and .change.before.memory[0].dedicated != .change.after.memory[0].dedicated
+                 then " (RAM \(.change.before.memory[0].dedicated) -> \(.change.after.memory[0].dedicated) Mo)" else "" end)' tfplan.json
+          destroyed="$(jq -r '.resource_changes[]? | select(.type == "proxmox_virtual_environment_vm")
+            | select(.change.actions | index("delete")) | .address' tfplan.json)"
+          if [[ -n "${destroyed}" ]]; then
+            echo "::error::Le plan supprime ou recrée des VM : ${destroyed//$'\n'/, }. Apply annulé — à traiter à la main."
+            exit 1
+          fi
+
+      # -parallelism=1 : un changement de RAM/CPU redémarre la VM (pas de
+      # hotplug) ; une VM à la fois, jamais tous les masters ensemble.
       - name: Terraform apply
         working-directory: terraform/clusters/${{ matrix.org }}
         env:
           TF_VAR_vault_role_id: ${{ secrets.VAULT_CI_ROLE_ID }}
           TF_VAR_vault_secret_id: ${{ secrets.VAULT_CI_SECRET_ID }}
-        run: terraform apply -auto-approve -input=false
+        run: terraform apply -input=false -parallelism=1 tfplan
 
       # local_file.ansible_inventory (module/outputs.tf) n'existe que sur le
       # disque du runner après l'apply — committé ICI, avant tout run
