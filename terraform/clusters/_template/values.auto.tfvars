@@ -11,7 +11,7 @@
 
 org                      = "REPLACE_ME_ORG"
 env                      = "REPLACE_ME_ENV" # prod | staging | dev
-node_count               = 3                # minimum 3 (masters+workers)
+node_count               = 3                # 1 = single node (cluster de test perso, pas de HA) ; >= 3 = HA. 2 interdit.
 additional_workers_count = 0
 tags                     = ["devver", "REPLACE_ME_ORG", "REPLACE_ME_ENV"]
 
@@ -46,6 +46,11 @@ template_name = "rocky9-cloud-template"
 # master_cpu_cores = 4
 # master_memory    = 6144
 # master_disk_size = 40
+#
+# Single node (node_count = 1) : toute la stack tourne sur une VM, prévoir
+# ~10 GiB (devver-dev consomme ~11 GiB répartis sur 3 noeuds) :
+# master_cpu_cores = 4
+# master_memory    = 10240
 
 # worker_cpu_cores       = 4
 # worker_memory          = 6144

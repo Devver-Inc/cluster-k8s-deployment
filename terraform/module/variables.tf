@@ -41,12 +41,14 @@ variable "org_subnet_index" {
 }
 
 variable "node_count" {
-  description = "Nombre de noeuds master+worker (control-plane ET schedulable). Minimum 3."
+  description = "Nombre de noeuds master+worker (control-plane ET schedulable). 1 (single node, cluster de test) ou >= 3 (HA)."
   type        = number
 
+  # 2 est refusé : avec 2 membres etcd, la perte d'un seul noeud fait perdre
+  # le quorum — moins disponible qu'un cluster single node.
   validation {
-    condition     = var.node_count >= 3
-    error_message = "node_count doit être >= 3 (minimum HA control-plane)."
+    condition     = var.node_count == 1 || var.node_count >= 3
+    error_message = "node_count doit valoir 1 (single node, test) ou être >= 3 (HA control-plane). 2 est interdit (quorum etcd)."
   }
 }
 
