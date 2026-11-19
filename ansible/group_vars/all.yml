@@ -39,6 +39,12 @@ metallb_chart_version: "0.16.1"
 frontal_source_ips:
   - 192.168.20.8/32
 
+# Plugin Traefik de validation des JWT (Logto) : création de tunnel OpenTunnel
+# (chart opentunnel, Middleware plugin "jwt"). Version figée, téléchargée par
+# Traefik depuis le catalogue de plugins au démarrage.
+traefik_jwt_plugin_module: github.com/agilezebra/jwt-middleware
+traefik_jwt_plugin_version: v1.6.0
+
 # Chart argo-cd installé au bootstrap (06-argocd-bootstrap.yml) — garder
 # identique à versions.argocd de Devver-Inc/kubernetes (argocd/values.yaml),
 # l'Application "argocd" reprenant ensuite la même release.
