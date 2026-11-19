@@ -62,4 +62,4 @@ master_memory    = 10240
 # l'écrit ici pour que Terraform ne le ramène pas sur SSD-PVE-DATA.
 master_os_datastore_id = "nfs-pve-prod"
 etcd_disk_size         = 10
-etcd_disk_datastore_id = "" # test 1 : même datastore que le système
+etcd_disk_datastore_id = "SSD-PVE-DATA" # test 2 : etcd seul sur SSD-PVE-DATA, système sur nfs-pve-prod
