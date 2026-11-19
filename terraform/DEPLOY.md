@@ -386,7 +386,29 @@ frontal, par l'API de Traefik Manager, deux routes TCP en passthrough TLS :
 | `<cluster>-git` | `git.<domaine>` | `<IP MetalLB>:9443` | 100 |
 
 Une route créée à la main qui vise déjà l'IP du cluster (443 ou 9443) est
-remplacée. Le job `delete-cluster` supprime les deux routes au destroy.
+remplacée. Le job `delete-cluster` supprime les deux routes au destroy (le
+serversTransport `<cluster>-proxy-protocol` peut rester dans `tcp.yml`,
+inutilisé et sans effet).
+
+**IP réelle des visiteurs (PROXY protocol v2).** Les deux routes sont en
+passthrough : sans rien de plus, le cluster ne voit que l'adresse du frontal.
+La route `<cluster>-https` envoie donc un en-tête PROXY v2 au cluster
+(serversTransport `<cluster>-proxy-protocol`, posé par le YAML brut de la route
+car le formulaire de Traefik Manager ne le gère pas). Côté cluster
+(playbook 03) :
+- l'entrypoint `websecure` lit l'en-tête seulement depuis `frontal_source_ips`
+  (`ansible/group_vars/all.yml`, `192.168.20.8/32`) ; une connexion sans
+  en-tête (réseau local, accès direct à l'IP MetalLB) passe toujours ;
+- le Service de Traefik est en `externalTrafficPolicy: Local` : pas de SNAT de
+  kube-proxy, Traefik voit bien l'adresse du frontal ;
+- le playbook 03 attend que Traefik ait redémarré avec le réglage avant que le
+  07 n'active l'en-tête : dans l'autre ordre, plus aucun site HTTPS du cluster
+  ne répond.
+
+Traefik renseigne alors `X-Forwarded-For` / `X-Real-Ip` avec l'IP du visiteur
+pour toutes les applications HTTP, et transmet l'en-tête PROXY aux services
+TCP qui le demandent (OpenTunnel, `proxyProtocol: true`). La route
+`<cluster>-git` n'envoie pas d'en-tête (l'entrypoint `gitssh` ne le lit pas).
 
 **Prérequis, une seule fois :**
 - Vault `devver-infra-deployment/shared/traefik` :
@@ -407,3 +429,7 @@ remplacée. Le job `delete-cluster` supprime les deux routes au destroy.
 `X-Requested-With: fetch` (sans lui, un refus n'est qu'une redirection 302) ;
 champs répétés `entryPoints` / `targetIp` / `targetPort` : 2e valeur = TCP ;
 `tcpRule`, `tlsPassthrough=true` et `backendsJsonTcp` (cible + priorité).
+YAML brut d'une route : `GET /api/routes/<fichier>::<nom>/raw` (renvoie `raw` et
+`fingerprints`), `POST` du même chemin en JSON `{content, fingerprints,
+applyShared: false, applyRename: false}` ; un `/save` ultérieur conserve le
+`serversTransport`.
