@@ -16,11 +16,25 @@
   become: true
 
   tasks:
-    - name: Mettre à jour tous les paquets
+    # Relance sur un cluster en service (job configure) : pas de mise à jour
+    # complète des paquets. Elle durait ~15 min et redémarrait RKE2 (scripts
+    # RPM) sur tous les nœuds à la fois — coupure des sites. Elle n'est faite
+    # qu'à l'installation (RKE2 absent) ; ensuite, mises à jour OS à planifier
+    # nœud par nœud. Les paquets rke2-* ne sont jamais mis à jour ici : la
+    # version de RKE2 est celle de rke2_version (02-dependencies.yml).
+    - name: RKE2 déjà installé ? (RPM -> /usr/bin, archive -> /usr/local/bin)
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop: [/usr/bin/rke2, /usr/local/bin/rke2]
+      register: _rke2_bin
+
+    - name: Mettre à jour tous les paquets (nouveau nœud seulement)
       ansible.builtin.dnf:
         name: "*"
         state: latest
         update_cache: true
+        exclude: "rke2-*"
+      when: not (_rke2_bin.results | selectattr('stat.exists') | list)
 
     - name: Configurer les serveurs DNS
       ansible.builtin.copy:
