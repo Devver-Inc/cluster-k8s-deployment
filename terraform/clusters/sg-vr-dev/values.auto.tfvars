@@ -44,7 +44,7 @@ proxmox_node = "PROXMOX-PVE1"
 #   - disque système, pods, cloud-init : nfs-pve-prod ;
 #   - disque dédié etcd (scsi1, 10 Go)  : SSD-PVE-DATA, rien d'autre dessus.
 datastore_id           = "nfs-pve-prod"
-etcd_disk_size         = 0 # validation migration : créé SANS disque etcd, activé ensuite (cluster existant simulé)
+etcd_disk_size         = 10 # migration à chaud vers un disque etcd dédié (SSD-PVE-DATA)
 etcd_disk_datastore_id = "SSD-PVE-DATA"
 template_name          = "rocky9-cloud-template"
 
