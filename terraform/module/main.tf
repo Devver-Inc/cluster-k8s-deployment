@@ -32,11 +32,25 @@ resource "proxmox_virtual_environment_vm" "mixed" {
   }
 
   disk {
-    datastore_id = var.datastore_id
+    datastore_id = local.master_os_datastore
     interface    = "scsi0"
     size         = var.master_disk_size
     discard      = "on"
     iothread     = true
+  }
+
+  # Disque dédié à etcd : etcd ne fait plus la queue derrière les écritures
+  # des pods (fsync sur son propre système de fichiers, sa propre file IO).
+  # Formaté et monté par ansible/playbooks/tasks/etcd-disk.yml.
+  dynamic "disk" {
+    for_each = var.etcd_disk_size > 0 ? [1] : []
+    content {
+      datastore_id = local.etcd_datastore
+      interface    = "scsi1"
+      size         = var.etcd_disk_size
+      discard      = "on"
+      iothread     = true
+    }
   }
 
   network_device {

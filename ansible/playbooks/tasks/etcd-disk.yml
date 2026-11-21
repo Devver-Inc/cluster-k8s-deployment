@@ -1,0 +1,190 @@
+---
+# Disque dédié à etcd (scsi1, créé par Terraform quand etcd_disk_size > 0),
+# monté sur /var/lib/rancher/rke2/server/db.
+#
+# - Nouveau nœud (etcd pas encore initialisé) : formatage + montage, avant
+#   que 03-cluster-init.yml ne démarre rke2-server.
+# - Cluster en service (etcd déjà sur le disque système) : arrêt de
+#   rke2-server, copie de db/ sur le nouveau disque, montage, redémarrage.
+#   L'ancien répertoire est gardé (db.pre-etcd-disk) pour un retour arrière.
+#   Joué nœud par nœud (serial: 1 dans 02-dependencies.yml) : en HA, etcd
+#   garde son quorum ; en single node, coupure de l'API ~1-2 min.
+# - Idempotent : rien à faire si db/ est déjà monté.
+#
+# Garde-fou : rke2-server exige le montage (RequiresMountsFor). Si le disque
+# manque au boot, RKE2 ne démarre pas, au lieu de repartir sur un db/ vide
+# (ce qui créerait un nouveau cluster etcd vide).
+
+- name: etcd-disk | Montage actuel de {{ etcd_db_dir }}
+  ansible.builtin.command: findmnt -n -o SOURCE --mountpoint {{ etcd_db_dir }}
+  register: _etcd_mnt
+  changed_when: false
+  failed_when: false
+
+- name: etcd-disk | Migration / premier montage
+  when: _etcd_mnt.rc != 0
+  block:
+    - name: etcd-disk | Rescanner le bus SCSI (disque ajouté à chaud)
+      ansible.builtin.shell: for h in /sys/class/scsi_host/host*/scan; do echo "- - -" > "$h"; done
+      changed_when: false
+
+    - name: etcd-disk | Attendre le disque {{ etcd_disk_device }}
+      ansible.builtin.wait_for:
+        path: "{{ etcd_disk_device }}"
+        timeout: 120
+
+    - name: etcd-disk | Système de fichiers XFS (ne reformate jamais un disque déjà formaté)
+      community.general.filesystem:
+        dev: "{{ etcd_disk_device }}"
+        fstype: xfs
+
+    # Seul db/etcd/member prouve un etcd initialisé : l'installation de RKE2
+    # crée déjà un db/snapshots vide. Tester « db/ non vide » prenait un nœud
+    # neuf pour un cluster en service et démarrait RKE2 sans sa config (chaque
+    # master initialisait son propre etcd — constaté sur vr3-dev).
+    - name: etcd-disk | etcd déjà initialisé ? ({{ etcd_db_dir }}/etcd/member)
+      ansible.builtin.stat:
+        path: "{{ etcd_db_dir }}/etcd/member"
+      register: _etcd_member
+
+    - name: etcd-disk | État de rke2-server avant intervention
+      ansible.builtin.command: systemctl is-active rke2-server
+      register: _rke2_state
+      changed_when: false
+      failed_when: false
+
+    - name: etcd-disk | Migration nécessaire ?
+      ansible.builtin.set_fact:
+        _etcd_migrate: "{{ _etcd_member.stat.exists }}"
+        _rke2_was_active: "{{ _rke2_state.stdout == 'active' }}"
+
+    # Nœud neuf : le contenu de db/ (snapshots vide de l'installeur) part avec
+    # l'ancien répertoire ; le disque etcd est monté vide à sa place.
+    - name: etcd-disk | Nœud neuf — mettre de côté le db/ créé par l'installeur
+      ansible.builtin.shell: |
+        if [ -d {{ etcd_db_dir }} ] && [ ! -d {{ etcd_db_dir }}.installer ]; then
+          mv {{ etcd_db_dir }} {{ etcd_db_dir }}.installer
+        fi
+      when: not _etcd_migrate
+      changed_when: true
+
+    - name: etcd-disk | Copier etcd sur le nouveau disque (RKE2 arrêté)
+      when: _etcd_migrate
+      block:
+        - name: etcd-disk | Monter le disque en zone temporaire
+          ansible.posix.mount:
+            path: /mnt/etcd-disk
+            src: "{{ etcd_disk_device }}"
+            fstype: xfs
+            state: ephemeral
+
+        - name: etcd-disk | Le disque doit être vide (sécurité)
+          ansible.builtin.find:
+            paths: /mnt/etcd-disk
+            file_type: any
+          register: _etcd_target
+          failed_when: _etcd_target.matched > 0
+
+        - name: etcd-disk | Arrêter rke2-server
+          ansible.builtin.systemd:
+            name: rke2-server
+            state: stopped
+
+        # systemctl stop rke2-server laisse tourner les conteneurs (KillMode
+        # process) : etcd continuerait d'écrire dans l'ANCIEN répertoire
+        # (descripteurs ouverts, même après le mv) et la copie serait une
+        # image figée — perte de toutes les écritures jusqu'au reboot suivant
+        # (constaté sur sg-vr-dev). rke2-killall.sh arrête tous les conteneurs.
+        - name: etcd-disk | Arrêter tous les conteneurs RKE2 (rke2-killall.sh)
+          ansible.builtin.shell: |
+            for s in /usr/bin/rke2-killall.sh /usr/local/bin/rke2-killall.sh; do
+              [ -x "$s" ] && exec "$s"
+            done
+            echo "rke2-killall.sh introuvable" >&2; exit 1
+          changed_when: true
+
+        - name: etcd-disk | etcd doit être arrêté avant la copie
+          ansible.builtin.command: pgrep -x etcd
+          register: _etcd_pgrep
+          changed_when: false
+          failed_when: _etcd_pgrep.rc == 0
+
+        - name: etcd-disk | Copier {{ etcd_db_dir }} (cp -a, attributs et contextes conservés)
+          ansible.builtin.command: cp -a {{ etcd_db_dir }}/. /mnt/etcd-disk/
+          changed_when: true
+
+        - name: etcd-disk | Démonter la zone temporaire
+          ansible.posix.mount:
+            path: /mnt/etcd-disk
+            state: unmounted
+
+        - name: etcd-disk | Garder l'ancien répertoire (retour arrière)
+          ansible.builtin.command: mv {{ etcd_db_dir }} {{ etcd_db_dir }}.pre-etcd-disk
+          changed_when: true
+
+    - name: etcd-disk | Point de montage
+      ansible.builtin.file:
+        path: "{{ etcd_db_dir }}"
+        state: directory
+        mode: "0700"
+
+    - name: etcd-disk | UUID du disque
+      ansible.builtin.command: blkid -s UUID -o value {{ etcd_disk_device }}
+      register: _etcd_uuid
+      changed_when: false
+
+    - name: etcd-disk | Monter (fstab) sur {{ etcd_db_dir }}
+      ansible.posix.mount:
+        path: "{{ etcd_db_dir }}"
+        src: "UUID={{ _etcd_uuid.stdout }}"
+        fstype: xfs
+        opts: noatime,nofail
+        state: mounted
+
+    - name: etcd-disk | Droits et contexte SELinux
+      ansible.builtin.shell: |
+        chmod 0700 {{ etcd_db_dir }}
+        if selinuxenabled 2>/dev/null; then restorecon -R {{ etcd_db_dir }}; fi
+      changed_when: false
+
+- name: etcd-disk | Répertoire des drop-ins rke2-server
+  ansible.builtin.file:
+    path: /etc/systemd/system/rke2-server.service.d
+    state: directory
+    mode: "0755"
+
+- name: etcd-disk | rke2-server exige le montage
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/rke2-server.service.d/etcd-disk.conf
+    mode: "0644"
+    content: |
+      # Géré par Ansible (tasks/etcd-disk.yml) : sans le disque etcd monté,
+      # rke2-server ne démarre pas (au lieu de repartir sur un etcd vide).
+      [Unit]
+      RequiresMountsFor={{ etcd_db_dir }}
+  register: _etcd_dropin
+
+- name: etcd-disk | Recharger systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: _etcd_dropin.changed
+
+# Jamais démarrer un rke2-server qui ne tournait pas avant (nœud neuf, ou
+# nœud dont 03-cluster-init.yml n'a pas encore écrit la config).
+- name: etcd-disk | Redémarrer rke2-server après migration
+  when: (_etcd_migrate | default(false)) and (_rke2_was_active | default(false))
+  block:
+    - name: etcd-disk | Démarrer rke2-server
+      ansible.builtin.systemd:
+        name: rke2-server
+        state: started
+
+    - name: etcd-disk | Attendre que l'API soit prête (etcd compris)
+      ansible.builtin.command: >-
+        /var/lib/rancher/rke2/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml
+        get --raw /readyz
+      register: _etcd_ready
+      until: _etcd_ready.rc == 0
+      retries: 60
+      delay: 5
+      changed_when: false

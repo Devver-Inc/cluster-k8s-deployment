@@ -14,6 +14,7 @@ subnet_size         = 10 # nb d'IP réservées par org (noeuds + 1 IP MetalLB en
 org_subnet_index = {
   devver-dev = 0
   sg-vr-dev  = 1
+  vr3-dev    = 2
   # preprod = 1
   # orgaX   = 2
 }

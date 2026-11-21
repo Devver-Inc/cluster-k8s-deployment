@@ -76,6 +76,10 @@ module "cluster" {
   master_memory    = var.master_memory
   master_disk_size = var.master_disk_size
 
+  master_os_datastore_id = var.master_os_datastore_id
+  etcd_disk_size         = var.etcd_disk_size
+  etcd_disk_datastore_id = var.etcd_disk_datastore_id
+
   worker_cpu_cores       = var.worker_cpu_cores
   worker_memory          = var.worker_memory
   worker_disk_size       = var.worker_disk_size

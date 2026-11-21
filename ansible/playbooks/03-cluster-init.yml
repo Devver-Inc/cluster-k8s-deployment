@@ -254,6 +254,28 @@
       ansible.builtin.pause:
         seconds: 30
 
+    # Garde-fou : un master qui a démarré seul (son propre etcd) ne rejoint
+    # jamais le cluster, sans erreur visible ailleurs (constaté sur vr3-dev).
+    - name: Vérifier que TOUS les noeuds de l'inventaire sont dans le cluster
+      ansible.builtin.command: >-
+        /var/lib/rancher/rke2/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml
+        get nodes --no-headers -o custom-columns=N:.metadata.name
+      register: _cluster_nodes
+      until: (_cluster_nodes.stdout_lines | length) >= (groups['k8s_cluster'] | length)
+      retries: 30
+      delay: 10
+      changed_when: false
+
+    - name: Vérifier que etcd a un membre par master
+      ansible.builtin.shell: >-
+        /var/lib/rancher/rke2/bin/kubectl --kubeconfig /etc/rancher/rke2/rke2.yaml
+        get nodes -l node-role.kubernetes.io/etcd=true --no-headers | wc -l
+      register: _etcd_nodes
+      until: (_etcd_nodes.stdout | int) == (groups['server'] | length)
+      retries: 30
+      delay: 10
+      changed_when: false
+
     - name: Lire le kubeconfig généré par RKE2
       ansible.builtin.slurp:
         src: /etc/rancher/rke2/rke2.yaml
