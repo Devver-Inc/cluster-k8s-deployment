@@ -155,6 +155,23 @@ cat ansible-inventory/inventory-prod.ini   # groupes [server]/[agent] peuplés
 terraform destroy
 ```
 
+## Cluster de test perso (single node)
+
+Même procédure que ci-dessus. Seul le dimensionnement change :
+
+- Le dossier s'appelle `<prenom>-dev` (domaine `<prenom>-dev.devver.app`).
+- Mettre `node_count = 1` et `master_memory = 10240` (4 vCPU). 2 noeuds sont refusés, à cause du quorum etcd.
+- Mettre `kubernetes_git_revision` sur la branche à tester, ou laisser `main`.
+
+Limites :
+- Pas de HA : un reboot ou une mise à jour coupe tout le cluster.
+- Passer de 1 à 3 masters n'est pas un chemin testé. Recréer le cluster à la place.
+- Ce qui reste à faire pour chaque cluster ne change pas :
+  - une entrée dans `org_subnet_index` (la plage actuelle permet 9 clusters au total) ;
+  - un partage NFS dédié sur le NAS ;
+  - deux runs de pipeline ;
+  - environ 11 certificats Let's Encrypt.
+
 ## Via la pipeline CI
 
 Un seul workflow, [`provision-cluster.yml`](../.github/workflows/provision-cluster.yml)
