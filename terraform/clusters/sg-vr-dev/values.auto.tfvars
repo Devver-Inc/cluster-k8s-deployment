@@ -37,9 +37,16 @@ nfs_share  = "/volume1/NFS_K8S_SG-VR_DEV"
 # chart racine argocd/ — sinon ArgoCD ne déploie rien).
 kubernetes_git_revision = "main"
 
-proxmox_node  = "PROXMOX-PVE1"
-datastore_id  = "SSD-PVE-DATA"
-template_name = "rocky9-cloud-template"
+proxmox_node = "PROXMOX-PVE1"
+# Stockage des VMs (mesuré sur sg-vr-dev, 2026-11-21) : etcd est très sensible
+# à la latence de fsync. Sur un même stockage que les pods, il sature et le
+# control plane redémarre en boucle (API indisponible). Choix retenu :
+#   - disque système, pods, cloud-init : nfs-pve-prod ;
+#   - disque dédié etcd (scsi1, 10 Go)  : SSD-PVE-DATA, rien d'autre dessus.
+datastore_id           = "nfs-pve-prod"
+etcd_disk_size         = 0 # validation migration : créé SANS disque etcd, activé ensuite (cluster existant simulé)
+etcd_disk_datastore_id = "SSD-PVE-DATA"
+template_name          = "rocky9-cloud-template"
 
 # Ressources personnalisables indépendamment par org/environnement (valeurs par
 # défaut dans module/variables.tf si omises ici) :
@@ -56,10 +63,3 @@ master_memory    = 10240
 # worker_memory          = 6144
 # worker_disk_size       = 40
 # worker_extra_disk_size = 150
-
-# Test disque etcd dédié (branche victor/etcd-disk).
-# Le disque système a été déplacé à la main sur nfs-pve-prod (Proxmox) : on
-# l'écrit ici pour que Terraform ne le ramène pas sur SSD-PVE-DATA.
-master_os_datastore_id = "SSD-PVE-DATA"
-etcd_disk_size         = 10
-etcd_disk_datastore_id = "" # test 3 : système + etcd sur SSD-PVE-DATA (2 disques)
