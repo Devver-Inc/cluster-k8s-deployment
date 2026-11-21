@@ -51,3 +51,9 @@ dans Vault : `kubernetes-cluster/<org>/<env>/` (voir
 6. Les secrets du cluster sont préparés par la pipeline dès le 1er
    lancement (job `prepare-secrets`) ; elle s'arrête en listant ce qui reste
    à saisir avant de créer les VMs — voir `terraform/DEPLOY.md`.
+
+7. **Recréer un cluster sous le même nom : 5 fois par semaine maximum.**
+   Let's Encrypt limite à 5 par semaine les certificats émis pour exactement
+   le même nom (ex. `app.<domaine>`). Au-delà, cert-manager échoue
+   (`429 rateLimited`) jusqu'à la date indiquée dans l'Order, puis réessaie
+   tout seul. Pour des tests répétés, changer le nom du cluster.
