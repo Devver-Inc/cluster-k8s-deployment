@@ -38,16 +38,35 @@
         dev: "{{ etcd_disk_device }}"
         fstype: xfs
 
-    - name: etcd-disk | Contenu existant de {{ etcd_db_dir }}
-      ansible.builtin.find:
-        paths: "{{ etcd_db_dir }}"
-        file_type: any
-      register: _etcd_existing
+    # Seul db/etcd/member prouve un etcd initialisé : l'installation de RKE2
+    # crée déjà un db/snapshots vide. Tester « db/ non vide » prenait un nœud
+    # neuf pour un cluster en service et démarrait RKE2 sans sa config (chaque
+    # master initialisait son propre etcd — constaté sur vr3-dev).
+    - name: etcd-disk | etcd déjà initialisé ? ({{ etcd_db_dir }}/etcd/member)
+      ansible.builtin.stat:
+        path: "{{ etcd_db_dir }}/etcd/member"
+      register: _etcd_member
+
+    - name: etcd-disk | État de rke2-server avant intervention
+      ansible.builtin.command: systemctl is-active rke2-server
+      register: _rke2_state
+      changed_when: false
       failed_when: false
 
-    - name: etcd-disk | etcd déjà initialisé sur le disque système ?
+    - name: etcd-disk | Migration nécessaire ?
       ansible.builtin.set_fact:
-        _etcd_migrate: "{{ (_etcd_existing.matched | default(0)) > 0 }}"
+        _etcd_migrate: "{{ _etcd_member.stat.exists }}"
+        _rke2_was_active: "{{ _rke2_state.stdout == 'active' }}"
+
+    # Nœud neuf : le contenu de db/ (snapshots vide de l'installeur) part avec
+    # l'ancien répertoire ; le disque etcd est monté vide à sa place.
+    - name: etcd-disk | Nœud neuf — mettre de côté le db/ créé par l'installeur
+      ansible.builtin.shell: |
+        if [ -d {{ etcd_db_dir }} ] && [ ! -d {{ etcd_db_dir }}.installer ]; then
+          mv {{ etcd_db_dir }} {{ etcd_db_dir }}.installer
+        fi
+      when: not _etcd_migrate
+      changed_when: true
 
     - name: etcd-disk | Copier etcd sur le nouveau disque (RKE2 arrêté)
       when: _etcd_migrate
@@ -150,8 +169,10 @@
     daemon_reload: true
   when: _etcd_dropin.changed
 
+# Jamais démarrer un rke2-server qui ne tournait pas avant (nœud neuf, ou
+# nœud dont 03-cluster-init.yml n'a pas encore écrit la config).
 - name: etcd-disk | Redémarrer rke2-server après migration
-  when: _etcd_migrate | default(false)
+  when: (_etcd_migrate | default(false)) and (_rke2_was_active | default(false))
   block:
     - name: etcd-disk | Démarrer rke2-server
       ansible.builtin.systemd:
