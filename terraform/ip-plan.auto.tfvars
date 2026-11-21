@@ -13,8 +13,6 @@ subnet_size         = 10 # nb d'IP réservées par org (noeuds + 1 IP MetalLB en
 # échoue explicitement si deux orgs partagent accidentellement le même index.
 org_subnet_index = {
   devver-dev = 0
-  sg-vr-dev  = 1 # cluster de test : retirer APRÈS sa destruction
-  vr3-dev    = 2 # cluster de test : retirer APRÈS sa destruction
   # preprod = 1
   # orgaX   = 2
 }
