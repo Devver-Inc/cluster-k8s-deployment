@@ -57,3 +57,9 @@ dans Vault : `kubernetes-cluster/<org>/<env>/` (voir
    le même nom (ex. `app.<domaine>`). Au-delà, cert-manager échoue
    (`429 rateLimited`) jusqu'à la date indiquée dans l'Order, puis réessaie
    tout seul. Pour des tests répétés, changer le nom du cluster.
+
+8. **Détruire un cluster : retirer son dossier, PAS son index réseau.**
+   La destruction (job `delete-cluster`) restaure l'ancien dossier, mais lit
+   `org_subnet_index` dans le `ip-plan.auto.tfvars` actuel. Si l'index a déjà
+   été retiré, `terraform destroy` échoue (`Invalid index`). Ne libérer
+   l'index qu'une fois la destruction terminée.
