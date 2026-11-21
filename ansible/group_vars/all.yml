@@ -50,10 +50,11 @@ argocd_root_repo: git@github.com:Devver-Inc/kubernetes.git
 # cf. terraform/README.md et ansible/README.md pour la migration future).
 rke2_first_server: "{{ groups['server'][0] }}"
 
+rke2_first_server_ip: "{{ hostvars[rke2_first_server]['ansible_host'] }}"
+
 # Disque dédié à etcd (tasks/etcd-disk.yml) : scsi1 Proxmox (virtio-scsi).
 etcd_db_dir: /var/lib/rancher/rke2/server/db
 etcd_disk_device: /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
-rke2_first_server_ip: "{{ hostvars[rke2_first_server]['ansible_host'] }}"
 
 # Secrets de l'org, lus une fois depuis Vault (KV v2) — utilisés comme
 # ansible_ssh_private_key_file / ansible_become_password. La clé privée est

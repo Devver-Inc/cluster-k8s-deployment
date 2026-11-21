@@ -172,6 +172,24 @@ Limites :
   - deux runs de pipeline ;
   - environ 11 certificats Let's Encrypt.
 
+## Stockage des nouveaux clusters (etcd dédié)
+
+Le template place chaque cluster ainsi :
+
+| Disque | Datastore | Variable |
+|---|---|---|
+| Système, pods (images, logs), cloud-init | `nfs-pve-prod` | `datastore_id` |
+| etcd (`scsi1`, 10 Go, monté sur `/var/lib/rancher/rke2/server/db`) | `SSD-PVE-DATA` | `etcd_disk_size`, `etcd_disk_datastore_id` |
+
+Pourquoi : etcd est très sensible à la latence de `fsync`. Tests de charge sur sg-vr-dev (2026-11) :
+- tout sur `SSD-PVE-DATA` : le SSD sature sous les écritures des pods, l'API tombe et le control plane redémarre en boucle ;
+- tout sur `nfs-pve-prod` : etcd est trop lent (requêtes jusqu'à 20 s), même sur un disque à lui ;
+- etcd seul sur `SSD-PVE-DATA`, le reste sur `nfs-pve-prod` : aucune coupure, aucune écriture lente, aucun redémarrage.
+
+Le playbook `ansible/playbooks/tasks/etcd-disk.yml` formate et monte le disque avant le démarrage de RKE2. `rke2-server` refuse de démarrer si le disque n'est pas monté, pour ne pas repartir sur un etcd vide.
+
+Clusters existants : rien ne change (`etcd_disk_size` vaut 0 par défaut). Le playbook sait migrer etcd sur un cluster en service : il arrête RKE2 et ses conteneurs, copie etcd, monte le disque et redémarre. Cette migration est validée en single node, **pas encore en HA**. À tester sur un cluster de test avant tout cluster en service.
+
 ## Via la pipeline CI
 
 Un seul workflow, [`provision-cluster.yml`](../.github/workflows/provision-cluster.yml)
