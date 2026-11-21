@@ -37,9 +37,16 @@ nfs_share  = "/volume1/NFS_K8S_REPLACE_ME"
 # chart racine argocd/ — sinon ArgoCD ne déploie rien).
 kubernetes_git_revision = "main"
 
-proxmox_node  = "PROXMOX-PVE1"
-datastore_id  = "SSD-PVE-DATA"
-template_name = "rocky9-cloud-template"
+proxmox_node = "PROXMOX-PVE1"
+# Stockage des VMs (mesuré sur sg-vr-dev, 2026-11-21) : etcd est très sensible
+# à la latence de fsync. Sur un même stockage que les pods, il sature et le
+# control plane redémarre en boucle (API indisponible). Choix retenu :
+#   - disque système, pods, cloud-init : nfs-pve-prod ;
+#   - disque dédié etcd (scsi1, 10 Go)  : SSD-PVE-DATA, rien d'autre dessus.
+datastore_id           = "nfs-pve-prod"
+etcd_disk_size         = 10
+etcd_disk_datastore_id = "SSD-PVE-DATA"
+template_name          = "rocky9-cloud-template"
 
 # Ressources personnalisables indépendamment par org/environnement (valeurs par
 # défaut dans module/variables.tf si omises ici) :
