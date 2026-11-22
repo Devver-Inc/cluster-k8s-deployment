@@ -842,6 +842,14 @@ jobs:
             exit 1
           fi
           git checkout "${delete_sha}~1" -- "terraform/clusters/${org}/"
+          # Le dossier lit le plan IP partagé (lien ip-plan.auto.tfvars ->
+          # ../../ip-plan.auto.tfvars). Si l'index de l'org a déjà été retiré
+          # de main, terraform destroy échoue ("Invalid index", constaté sur
+          # vr3-dev/sg-vr-dev). On restaure donc AUSSI le plan IP tel qu'il
+          # était au même commit — seulement dans l'espace de travail du job.
+          git checkout "${delete_sha}~1" -- terraform/ip-plan.auto.tfvars
+          grep -Eq "^[[:space:]]*\"?${org}\"?[[:space:]]*=" terraform/ip-plan.auto.tfvars \
+            || { echo "Index réseau de ${org} introuvable même dans le plan IP restauré." >&2; exit 1; }
 
       - name: Vault auth + fetch B2 credentials
         uses: hashicorp/vault-action@v3
