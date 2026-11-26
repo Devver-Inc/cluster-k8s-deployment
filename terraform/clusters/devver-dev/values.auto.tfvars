@@ -29,7 +29,7 @@ nfs_share  = "/volume1/NFS_K8S_DEVVER_DEV"
 # base_domain    = "devver.app"                  # zone Cloudflare
 # cluster_domain = ""                            # surcharge (vide = règle)
 # dns_records    = true
-# dns_target     = "reverse-proxy.vrhometech.fr"
+# dns_target     = "lb.lpv.vops.fr"
 
 # Révision du repo Devver-Inc/kubernetes suivie par ArgoCD (défaut main ;
 # une branche pendant les tests, un tag en prod).

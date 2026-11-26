@@ -41,7 +41,7 @@ dans Vault : `kubernetes-cluster/<org>/<env>/` (voir
    `staging.devver.app`, `dev.devver.app` ; autre org → `<org>-<env>.devver.app`.
    Surcharge : `cluster_domain` (doit rester dans la zone `base_domain`).
    Terraform crée dans Cloudflare `<domaine>` et `*.<domaine>` en CNAME vers
-   `dns_target` (`reverse-proxy.vrhometech.fr`, non proxifiés) et les
+   `dns_target` (`lb.lpv.vops.fr`, non proxifiés) et les
    supprime au destroy (`dns_records = false` pour ne pas les gérer).
    Prod : supprimer d'abord l'ancien enregistrement `devver.app`.
 
