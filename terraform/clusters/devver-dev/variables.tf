@@ -50,7 +50,7 @@ variable "dns_records" {
 variable "dns_target" {
   description = "Cible des CNAME du cluster : le reverse proxy frontal"
   type        = string
-  default     = "reverse-proxy.vrhometech.fr"
+  default     = "lb.lpv.vops.fr"
 }
 
 variable "nfs_server" {
