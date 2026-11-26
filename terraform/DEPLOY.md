@@ -450,7 +450,7 @@ TCP qui le demandent (OpenTunnel, `proxyProtocol: true`). La route
 
   | Clé | Contenu |
   |---|---|
-  | `api_url` | `https://lb-traefik.vrhometech.fr/api` |
+  | `api_url` | `https://traefik.vops.fr/api` |
   | `api_key` | clé API de Traefik Manager (Settings → Authentication → API Key) |
   | `api_ip` | IP de Traefik Manager (`192.168.20.8`) : le nom n'existe que sur le DNS local, la pipeline l'ajoute au `/etc/hosts` du conteneur |
 
